@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: airline_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: airline_rag
+      POSTGRES_USER: airline_user
+      POSTGRES_PASSWORD: airline_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: airline_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  postgres_data:
+  qdrant_data:
