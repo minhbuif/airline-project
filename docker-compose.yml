@@ -23,6 +23,19 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  ingest:
+    build: .
+    container_name: airline_ingest
+    depends_on:
+      - postgres
+      - qdrant
+    env_file:
+      - .env.docker
+    volumes:
+      - ./landing:/app/landing
+    command: ["python", "-m", "app.ingest"]
+
 volumes:
   postgres_data:
   qdrant_data:
+

@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+.env.local
+
+# Dataset / landing files
+landing/*
+!landing/.gitkeep
+
+# Large data files
+*.csv
+*.xlsx
+*.parquet
+*.jsonl
+*.zip
+
+# Docker / database local storage
+postgres_data/
+qdrant_data/
+
+# System files
+.DS_Store
