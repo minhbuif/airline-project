@@ -6,3 +6,6 @@ qdrant-client
 sentence-transformers
 python-dotenv
 tqdm
+fastapi
+uvicorn
+google-genai
