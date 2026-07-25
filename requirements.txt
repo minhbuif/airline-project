@@ -9,3 +9,5 @@ tqdm
 fastapi
 uvicorn
 google-genai
+firecrawl-py
+PyYAML

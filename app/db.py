@@ -1,16 +1,28 @@
+"""Postgres connection and review persistence helpers."""
+
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.config import settings
 
+# SQLAlchemy opens the actual database connection lazily on first use.
 engine = create_engine(settings.postgres_url)
 
 
-def test_postgres_connection():
-    with engine.begin() as conn:
-        result = conn.execute(text("SELECT 1;"))
-        print("Postgres connection OK:", result.scalar())
+def test_postgres_connection() -> None:
+    """Verify that Postgres is reachable before starting ingestion."""
+    try:
+        with engine.begin() as conn:
+            result = conn.execute(text("SELECT 1;"))
+            print("Postgres connection OK:", result.scalar())
+    except SQLAlchemyError as exc:
+        raise RuntimeError(
+            "Unable to connect to Postgres. Check the POSTGRES_* settings."
+        ) from exc
 
 
 def insert_review(row: dict) -> int:
+    """Insert one normalized review and return its database ID."""
     query = text("""
         INSERT INTO airline_reviews (
             source_row_id,
@@ -47,6 +59,13 @@ def insert_review(row: dict) -> int:
         RETURNING id;
     """)
 
-    with engine.begin() as conn:
-        result = conn.execute(query, row)
-        return result.scalar_one()
+    try:
+        # The transaction is committed on success and rolled back on failure.
+        with engine.begin() as conn:
+            result = conn.execute(query, row)
+            return int(result.scalar_one())
+    except SQLAlchemyError as exc:
+        source_row_id = row.get("source_row_id", "unknown")
+        raise RuntimeError(
+            f"Unable to insert review row {source_row_id} into Postgres."
+        ) from exc

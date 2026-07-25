@@ -1,0 +1,24 @@
+airlines:
+  Qatar Airways:
+    - source_name: Source A
+      url: https://www.flyertalk.com/forum/qatar-airways-privilege-club-644/
+    - source_name: Source B
+      url: https://flight-report.com/en/airline/4090/qatar-airways/
+    - source_name: Source C
+      url: https://www.tripadvisor.com/Airline_Review-d8729134-Reviews-Qatar-Airways
+
+  Emirates:
+    - source_name: Source A
+      url: https://www.flyertalk.com/forum/emirates-skywards-490/
+    - source_name: Source B
+      url: https://flight-report.com/en/airline/2182/emirates/
+    - source_name: Source C
+      url: https://www.tripadvisor.com/Airline_Review-d8729069-Reviews-Emirates
+
+  Singapore Airlines:
+    - source_name: Source A
+      url: https://www.flyertalk.com/forum/singapore-airlines-krisflyer-500/
+    - source_name: Source B
+      url: https://flight-report.com/en/airline/4432/singapore-airlines/
+    - source_name: Source C
+      url: https://www.tripadvisor.com/Airline_Review-d8729151-Reviews-Singapore-Airlines

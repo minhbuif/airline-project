@@ -1,3 +1,5 @@
+"""Retrieval-augmented prompt construction and answer orchestration."""
+
 from app.llm import generate_answer
 from app.retriever import retrieve_reviews
 
@@ -6,10 +8,16 @@ MAX_REVIEW_CHARACTERS = 3000
 
 
 def format_context(reviews: list[dict]) -> str:
+    """Format retrieved review payloads as numbered prompt sources."""
     context_blocks: list[str] = []
 
     for index, review in enumerate(reviews, start=1):
-        review_text = review.get("text") or ""
+        if not isinstance(review, dict):
+            raise ValueError(
+                f"Review {index} must be a dictionary."
+            )
+
+        review_text = str(review.get("text") or "")
 
         # Prevent one long review from consuming the whole prompt.
         review_text = review_text[:MAX_REVIEW_CHARACTERS]
@@ -35,6 +43,7 @@ Review:
 
 
 def build_prompt(question: str, context: str) -> str:
+    """Build a grounded prompt containing the question and source context."""
     return f"""
 You are an Airline Review Intelligence Assistant.
 
@@ -70,15 +79,31 @@ def prepare_rag_input(
     question: str,
     limit: int = 5,
 ) -> dict:
+    """Validate a question, retrieve reviews, and build the model prompt."""
+    if not isinstance(question, str):
+        raise ValueError("Question must be a string.")
+
     question = question.strip()
 
     if not question:
         raise ValueError("Question cannot be empty.")
 
-    reviews = retrieve_reviews(
-        query=question,
-        limit=limit,
-    )
+    if not isinstance(limit, int) or isinstance(limit, bool):
+        raise ValueError("limit must be an integer.")
+
+    if not 1 <= limit <= 10:
+        raise ValueError("limit must be between 1 and 10.")
+
+    try:
+        reviews = retrieve_reviews(
+            query=question,
+            limit=limit,
+        )
+    except (ValueError, RuntimeError):
+        # These exceptions already contain user-facing context.
+        raise
+    except Exception as exc:
+        raise RuntimeError("Review retrieval failed unexpectedly.") from exc
 
     context = format_context(reviews)
     prompt = build_prompt(question, context)
@@ -95,6 +120,7 @@ def answer_question(
     question: str,
     limit: int = 5,
 ) -> dict:
+    """Return a grounded answer together with its retrieved sources."""
     rag_input = prepare_rag_input(
         question=question,
         limit=limit,
@@ -109,8 +135,14 @@ def answer_question(
             "sources": [],
         }
 
-    answer = generate_answer(rag_input["prompt"])
+    try:
+        answer = generate_answer(rag_input["prompt"])
+    except (ValueError, RuntimeError):
+        raise
+    except Exception as exc:
+        raise RuntimeError("Answer generation failed unexpectedly.") from exc
 
+    # Add stable source numbers matching the citations requested in the prompt.
     sources = []
 
     for index, review in enumerate(retrieved_reviews, start=1):
