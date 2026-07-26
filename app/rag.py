@@ -8,7 +8,7 @@ MAX_REVIEW_CHARACTERS = 3000
 
 
 def format_context(reviews: list[dict]) -> str:
-    """Format retrieved review payloads as numbered prompt sources."""
+    """Format dataset reviews and web chunks as numbered prompt sources."""
     context_blocks: list[str] = []
 
     for index, review in enumerate(reviews, start=1):
@@ -22,8 +22,15 @@ def format_context(reviews: list[dict]) -> str:
         # Prevent one long review from consuming the whole prompt.
         review_text = review_text[:MAX_REVIEW_CHARACTERS]
 
+        document_type = review.get("document_type") or "passenger_review"
+        source_name = review.get("source_name") or "Airline review dataset"
+        source_url = review.get("source_url") or "Not available"
+
         block = f"""
 SOURCE {index}
+Source Type: {document_type}
+Source Name: {source_name}
+Source URL: {source_url}
 Airline: {review.get("airline_name") or "Unknown"}
 Title: {review.get("title") or "Untitled"}
 Review Date: {review.get("review_date") or "Unknown"}
@@ -33,7 +40,7 @@ Route: {review.get("route") or "Unknown"}
 Aircraft: {review.get("aircraft") or "Unknown"}
 Recommended: {review.get("recommended") or "Unknown"}
 
-Review:
+Source Content:
 {review_text}
 """.strip()
 
@@ -47,15 +54,16 @@ def build_prompt(question: str, context: str) -> str:
     return f"""
 You are an Airline Review Intelligence Assistant.
 
-Your task is to answer questions using only the passenger-review
-sources supplied below.
+Your task is to answer questions using only the passenger-review dataset
+and crawled web sources supplied below.
 
 Rules:
 1. Use only information contained in the supplied sources.
 2. Do not use outside knowledge.
 3. Cite claims with [SOURCE 1], [SOURCE 2], and so on.
 4. Clearly distinguish individual opinions from repeated patterns.
-5. Do not describe passenger reviews as objective facts.
+5. Treat passenger reviews and flight reports as subjective experiences,
+   not objective facts.
 6. Do not make claims about aviation safety, live ticket prices,
    current schedules, or airline performance outside this dataset.
 7. If the sources do not contain enough evidence, say:
@@ -68,7 +76,7 @@ Rules:
 USER QUESTION:
 {question}
 
-RETRIEVED PASSENGER REVIEWS:
+RETRIEVED AIRLINE SOURCES:
 {context}
 
 ANSWER:
@@ -131,7 +139,7 @@ def answer_question(
     if not retrieved_reviews:
         return {
             "question": question,
-            "answer": "No relevant reviews were found in the dataset.",
+            "answer": "No relevant indexed airline sources were found.",
             "sources": [],
         }
 

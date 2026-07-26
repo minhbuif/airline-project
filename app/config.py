@@ -36,6 +36,10 @@ class Settings:
         "QDRANT_COLLECTION",
         "airline_reviews",
     )
+    QDRANT_WEB_COLLECTION = os.getenv(
+        "QDRANT_WEB_COLLECTION",
+        "airline_web_documents",
+    )
 
     LANDING_PATH = os.getenv("LANDING_PATH", "./landing")
 

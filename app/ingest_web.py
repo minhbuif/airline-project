@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,10 +43,7 @@ from app.embedder import VECTOR_SIZE, embed_text
 
 
 DEFAULT_INPUT_PATH = Path("landing/web/crawled_pages.jsonl")
-DEFAULT_COLLECTION = os.getenv(
-    "QDRANT_WEB_COLLECTION",
-    "airline_web_documents",
-)
+DEFAULT_COLLECTION = settings.QDRANT_WEB_COLLECTION
 
 CHUNK_SIZE = 2_500
 CHUNK_OVERLAP = 300
@@ -132,6 +128,10 @@ UPSERT_DOCUMENT_SQL = text(
     """
 )
 
+DELETE_WEB_DOCUMENTS_SQL = text(
+    "DELETE FROM public.web_documents;"
+)
+
 
 def parse_args() -> argparse.Namespace:
     """Parse and validate command-line ingestion options."""
@@ -149,6 +149,14 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Process only the first N valid records for testing.",
+    )
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help=(
+            "Delete existing web documents and recreate the web Qdrant "
+            "collection before ingestion."
+        ),
     )
     args = parser.parse_args()
 
@@ -191,6 +199,10 @@ def validate_record(record: dict[str, Any], line_number: int) -> dict[str, Any]:
     normalized = {
         "airline_name": clean_string(record.get("airline_name")),
         "source_name": clean_string(record.get("source_name")),
+        "source_type": clean_string(
+            record.get("source_type") or "passenger_reviews"
+        ),
+        "source_root_url": clean_string(record.get("source_root_url")),
         "source_url": clean_string(record.get("source_url")),
         "resolved_url": clean_string(record.get("resolved_url")),
         "title": clean_string(record.get("title")),
@@ -355,10 +367,33 @@ def build_embedding_text(record: dict[str, Any], chunk: str) -> str:
     )
 
 
-def deterministic_point_id(content_hash: str, chunk_index: int) -> str:
-    """Build an idempotent Qdrant point ID for a document chunk."""
-    value = f"{content_hash}:{chunk_index}"
+def deterministic_point_id(source_url: str, chunk_index: int) -> str:
+    """Build an idempotent Qdrant point ID for a source-page chunk."""
+    value = f"{source_url}:{chunk_index}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, value))
+
+
+def reset_web_data(
+    client: QdrantClient,
+    collection_name: str,
+) -> None:
+    """Remove previously ingested web rows and vectors for a clean rebuild."""
+    try:
+        existing_names = {
+            collection.name
+            for collection in client.get_collections().collections
+        }
+        if collection_name in existing_names:
+            client.delete_collection(collection_name=collection_name)
+
+        with engine.begin() as connection:
+            connection.execute(DELETE_WEB_DOCUMENTS_SQL)
+    except Exception as exc:
+        raise RuntimeError(
+            "Unable to reset existing web ingestion data."
+        ) from exc
+
+    print("Removed existing web documents and vector collection")
 
 
 def create_qdrant_client() -> QdrantClient:
@@ -440,6 +475,8 @@ def main() -> None:
     create_schema()
 
     qdrant = create_qdrant_client()
+    if args.replace:
+        reset_web_data(qdrant, collection_name)
     ensure_qdrant_collection(qdrant, collection_name)
 
     records = list(read_jsonl(args.input, args.limit))
@@ -470,6 +507,8 @@ def main() -> None:
 
                 payload = {
                     "document_type": "web",
+                    "source_type": record["source_type"],
+                    "source_root_url": record["source_root_url"],
                     "postgres_id": postgres_id,
                     "airline_name": record["airline_name"],
                     "source_name": record["source_name"],
@@ -486,7 +525,7 @@ def main() -> None:
                 pending_points.append(
                     PointStruct(
                         id=deterministic_point_id(
-                            record["content_hash"],
+                            record["source_url"],
                             chunk_index,
                         ),
                         vector=vector,

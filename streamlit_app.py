@@ -29,6 +29,11 @@ with st.sidebar:
             "Qatar Airways",
             "Emirates",
             "Singapore Airlines",
+            "Cathay Pacific",
+            "ANA",
+            "Japan Airlines",
+            "Turkish Airlines",
+            "Lufthansa",
         ],
     )
 

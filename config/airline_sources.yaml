@@ -1,24 +1,139 @@
+# Each source starts from an airline listing page and follows only URLs that
+# match url_pattern. Limits keep crawl cost predictable while still collecting
+# multiple independent passenger reports per airline.
 airlines:
   Qatar Airways:
-    - source_name: Source A
-      url: https://www.flyertalk.com/forum/qatar-airways-privilege-club-644/
-    - source_name: Source B
+    - source_name: Flight-Report
       url: https://flight-report.com/en/airline/4090/qatar-airways/
-    - source_name: Source C
+      url_pattern: '^https://flight-report\.com/en/report/'
+      include_seed: false
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Qatar Airways, Review of]
+    - source_name: Tripadvisor
       url: https://www.tripadvisor.com/Airline_Review-d8729134-Reviews-Qatar-Airways
+      url_pattern: '^https://www\.tripadvisor\.com/Airline_Review-d8729134-Reviews(?:-or\d+)?-Qatar-Airways(?:\.html)?$'
+      include_seed: true
+      pagination_step: 10
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Qatar Airways, Date of travel]
 
   Emirates:
-    - source_name: Source A
-      url: https://www.flyertalk.com/forum/emirates-skywards-490/
-    - source_name: Source B
+    - source_name: Flight-Report
       url: https://flight-report.com/en/airline/2182/emirates/
-    - source_name: Source C
+      url_pattern: '^https://flight-report\.com/en/report/'
+      include_seed: false
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Emirates, Review of]
+    - source_name: Tripadvisor
       url: https://www.tripadvisor.com/Airline_Review-d8729069-Reviews-Emirates
+      url_pattern: '^https://www\.tripadvisor\.com/Airline_Review-d8729069-Reviews(?:-or\d+)?-Emirates(?:\.html)?$'
+      include_seed: true
+      pagination_step: 10
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Emirates, Date of travel]
 
   Singapore Airlines:
-    - source_name: Source A
-      url: https://www.flyertalk.com/forum/singapore-airlines-krisflyer-500/
-    - source_name: Source B
+    - source_name: Flight-Report
       url: https://flight-report.com/en/airline/4432/singapore-airlines/
-    - source_name: Source C
+      url_pattern: '^https://flight-report\.com/en/report/'
+      include_seed: false
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Singapore Airlines, Review of]
+    - source_name: Tripadvisor
       url: https://www.tripadvisor.com/Airline_Review-d8729151-Reviews-Singapore-Airlines
+      url_pattern: '^https://www\.tripadvisor\.com/Airline_Review-d8729151-Reviews(?:-or\d+)?-Singapore-Airlines(?:\.html)?$'
+      include_seed: true
+      pagination_step: 10
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Singapore Airlines, Date of travel]
+
+  Cathay Pacific:
+    - source_name: Flight-Report
+      url: https://flight-report.com/en/airline/13807/cathay-pacific/
+      url_pattern: '^https://flight-report\.com/en/report/'
+      include_seed: false
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Cathay Pacific, Review of]
+    - source_name: Tripadvisor
+      url: https://www.tripadvisor.com/Airline_Review-d8729046-Reviews-Cathay-Pacific
+      url_pattern: '^https://www\.tripadvisor\.com/Airline_Review-d8729046-Reviews(?:-or\d+)?-Cathay-Pacific(?:\.html)?$'
+      include_seed: true
+      pagination_step: 10
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Cathay Pacific, Date of travel]
+
+  ANA:
+    - source_name: Flight-Report
+      url: https://flight-report.com/en/airline/324/ana/
+      url_pattern: '^https://flight-report\.com/en/report/'
+      include_seed: false
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [ANA, Review of]
+    - source_name: Tripadvisor
+      url: https://www.tripadvisor.com/Airline_Review-d8729021-Reviews-ANA-All-Nippon-Airways
+      url_pattern: '^https://www\.tripadvisor\.com/Airline_Review-d8729021-Reviews(?:-or\d+)?-ANA-All-Nippon-Airways(?:\.html)?$'
+      include_seed: true
+      pagination_step: 10
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [All Nippon Airways, Date of travel]
+
+  Japan Airlines:
+    - source_name: Flight-Report
+      url: https://flight-report.com/en/airline/2986/japan-airlines/
+      url_pattern: '^https://flight-report\.com/en/report/'
+      include_seed: false
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Japan Airlines, Review of]
+    - source_name: Tripadvisor
+      url: https://www.tripadvisor.com/Airline_Review-d8729095-Reviews-Japan-Airlines-JAL
+      url_pattern: '^https://www\.tripadvisor\.com/Airline_Review-d8729095-Reviews(?:-or\d+)?-Japan-Airlines-JAL(?:\.html)?$'
+      include_seed: true
+      pagination_step: 10
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Japan Airlines, Date of travel]
+
+  Turkish Airlines:
+    - source_name: Flight-Report
+      url: https://flight-report.com/en/airline/4946/turkish-airlines/
+      url_pattern: '^https://flight-report\.com/en/report/'
+      include_seed: false
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Turkish Airlines, Review of]
+    - source_name: Tripadvisor
+      url: https://www.tripadvisor.com/Airline_Review-d8729174-Reviews-Turkish-Airlines
+      url_pattern: '^https://www\.tripadvisor\.com/Airline_Review-d8729174-Reviews(?:-or\d+)?-Turkish-Airlines(?:\.html)?$'
+      include_seed: true
+      pagination_step: 10
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Turkish Airlines, Date of travel]
+
+  Lufthansa:
+    - source_name: Flight-Report
+      url: https://flight-report.com/en/airline/3319/lufthansa/
+      url_pattern: '^https://flight-report\.com/en/report/'
+      include_seed: false
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Lufthansa, Review of]
+    - source_name: Tripadvisor
+      url: https://www.tripadvisor.com/Airline_Review-d8729113-Reviews-Lufthansa
+      url_pattern: '^https://www\.tripadvisor\.com/Airline_Review-d8729113-Reviews(?:-or\d+)?-Lufthansa(?:\.html)?$'
+      include_seed: true
+      pagination_step: 10
+      max_pages: 3
+      min_content_characters: 2500
+      required_terms: [Lufthansa, Date of travel]
