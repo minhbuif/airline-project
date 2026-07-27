@@ -23,5 +23,9 @@ landing/*
 postgres_data/
 qdrant_data/
 
+# Application runtime logs
+logs/
+*.log
+
 # System files
 .DS_Store

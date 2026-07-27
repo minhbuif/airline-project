@@ -31,6 +31,13 @@ else:
     FIRECRAWL_IMPORT_ERROR = None
 
 from app.config import settings
+from app.logging_config import (
+    get_logger,
+    new_request_id,
+    set_request_id,
+    track_call,
+    tracked_operation,
+)
 
 
 CONFIG_PATH = Path("config/airline_sources.yaml")
@@ -38,6 +45,7 @@ OUTPUT_PATH = Path("landing/web/crawled_pages.jsonl")
 DEFAULT_MIN_CONTENT_CHARACTERS = 1_000
 DEFAULT_MAX_PAGES = 5
 DEFAULT_REQUEST_DELAY_SECONDS = 1.0
+logger = get_logger(__name__)
 
 BLOCKED_CONTENT_MARKERS = (
     "verifying your connection",
@@ -225,8 +233,13 @@ def load_source_config(config_path: Path = CONFIG_PATH) -> dict[str, Any]:
         )
 
     try:
-        with config_path.open("r", encoding="utf-8") as file:
-            config = yaml.safe_load(file)
+        with tracked_operation(
+            logger,
+            "source_config_read",
+            path=config_path,
+        ):
+            with config_path.open("r", encoding="utf-8") as file:
+                config = yaml.safe_load(file)
     except OSError as exc:
         raise RuntimeError(
             f"Unable to read source configuration: {config_path}"
@@ -273,14 +286,20 @@ def scrape_document(client: Any, url: str, include_links: bool = False) -> Any:
     formats = ["markdown", "links"] if include_links else ["markdown"]
 
     try:
-        return client.scrape(
-            url,
-            formats=formats,
-            only_main_content=True,
-            remove_base64_images=True,
-            block_ads=True,
-            timeout=60_000,
-        )
+        with tracked_operation(
+            logger,
+            "firecrawl_scrape",
+            source_url=url,
+            include_links=include_links,
+        ):
+            return client.scrape(
+                url,
+                formats=formats,
+                only_main_content=True,
+                remove_base64_images=True,
+                block_ads=True,
+                timeout=60_000,
+            )
     except Exception as exc:
         raise RuntimeError(f"Firecrawl request failed for {url}") from exc
 
@@ -380,17 +399,25 @@ def load_existing_records(output_path: Path) -> list[dict[str, Any]]:
 
     records: list[dict[str, Any]] = []
     try:
-        with output_path.open("r", encoding="utf-8") as file:
-            for line_number, line in enumerate(file, start=1):
-                if not line.strip():
-                    continue
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    print(f"Skipping malformed existing line {line_number}: {exc}")
-                    continue
-                if isinstance(record, dict) and record.get("source_url"):
-                    records.append(record)
+        with tracked_operation(
+            logger,
+            "crawl_output_read",
+            path=output_path,
+        ):
+            with output_path.open("r", encoding="utf-8") as file:
+                for line_number, line in enumerate(file, start=1):
+                    if not line.strip():
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        print(
+                            "Skipping malformed existing line "
+                            f"{line_number}: {exc}"
+                        )
+                        continue
+                    if isinstance(record, dict) and record.get("source_url"):
+                        records.append(record)
     except OSError as exc:
         raise RuntimeError(f"Unable to read existing output: {output_path}") from exc
 
@@ -403,16 +430,23 @@ def write_records_atomically(
 ) -> None:
     """Replace JSONL output only after a complete successful crawl run."""
     try:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary_path = output_path.with_suffix(output_path.suffix + ".tmp")
-        with temporary_path.open("w", encoding="utf-8") as output:
-            for record in records:
-                output.write(json.dumps(record, ensure_ascii=False) + "\n")
-        os.replace(temporary_path, output_path)
+        with tracked_operation(
+            logger,
+            "crawl_output_write",
+            path=output_path,
+            record_count=len(records),
+        ):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_path = output_path.with_suffix(output_path.suffix + ".tmp")
+            with temporary_path.open("w", encoding="utf-8") as output:
+                for record in records:
+                    output.write(json.dumps(record, ensure_ascii=False) + "\n")
+            os.replace(temporary_path, output_path)
     except OSError as exc:
         raise RuntimeError(f"Unable to write crawl output: {output_path}") from exc
 
 
+@track_call
 def crawl_sources(
     config_path: Path = CONFIG_PATH,
     output_path: Path = OUTPUT_PATH,
@@ -420,6 +454,13 @@ def crawl_sources(
     append: bool = False,
 ) -> dict[str, int]:
     """Crawl configured sources and return detailed run metrics."""
+    set_request_id(new_request_id("crawl"))
+    logger.info(
+        "event=crawl_started config_path=%s output_path=%s append=%s",
+        config_path,
+        output_path,
+        append,
+    )
     if Firecrawl is None:
         raise RuntimeError(
             "firecrawl-py could not be imported. Activate the project's "
@@ -437,7 +478,8 @@ def crawl_sources(
         raise ValueError(f"Unknown airline selection: {', '.join(sorted(unknown))}")
 
     try:
-        client = Firecrawl(api_key=settings.FIRECRAWL_API_KEY)
+        with tracked_operation(logger, "firecrawl_client_initialization"):
+            client = Firecrawl(api_key=settings.FIRECRAWL_API_KEY)
     except Exception as exc:
         raise RuntimeError("Unable to initialize Firecrawl.") from exc
 
@@ -477,6 +519,14 @@ def crawl_sources(
             )
 
             print(f"Discovering {airline} | {source_name} | {seed_url}")
+            logger.info(
+                "event=crawl_source_started airline=%s source_name=%s "
+                "source_url=%s max_pages=%s",
+                airline,
+                source_name,
+                seed_url,
+                max_pages,
+            )
             metrics["sources_attempted"] += 1
 
             try:
@@ -531,6 +581,14 @@ def crawl_sources(
                 if issue or record is None:
                     metrics[f"rejected_{issue or 'unknown'}"] += 1
                     print(f"Rejected: {target_url} | {issue}")
+                    logger.info(
+                        "event=crawl_page_rejected airline=%s source_name=%s "
+                        "source_url=%s reason=%s",
+                        airline,
+                        source_name,
+                        target_url,
+                        issue or "unknown",
+                    )
                     continue
 
                 if record["content_hash"] in seen_hashes:
@@ -561,6 +619,14 @@ def crawl_sources(
 
     write_records_atomically(records, output_path)
     metrics["records_written"] = len(records)
+    logger.info(
+        "event=crawl_completed output_path=%s records_written=%s "
+        "pages_accepted=%s request_failed=%s",
+        output_path,
+        len(records),
+        metrics["pages_accepted"],
+        metrics["request_failed"],
+    )
 
     print("\nCrawl completed")
     for name, count in sorted(metrics.items()):

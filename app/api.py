@@ -1,8 +1,16 @@
 """FastAPI routes for retrieval-only search and generated answers."""
 
-from fastapi import FastAPI, HTTPException
+import re
+import time
+
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.logging_config import (
+    get_logger,
+    new_request_id,
+    request_context,
+)
 from app.rag import answer_question, prepare_rag_input
 
 
@@ -10,6 +18,56 @@ app = FastAPI(
     title="Airline Review RAG API",
     version="0.2.0",
 )
+logger = get_logger(__name__)
+
+
+@app.middleware("http")
+async def log_http_request(request: Request, call_next):
+    """Log safe HTTP metadata and attach a correlation ID to the response."""
+    supplied_request_id = request.headers.get("X-Request-ID", "")
+    if re.fullmatch(r"[A-Za-z0-9._-]{1,64}", supplied_request_id):
+        request_id = supplied_request_id
+    else:
+        request_id = new_request_id()
+    started_at = time.perf_counter()
+
+    with request_context(request_id):
+        logger.info(
+            "event=http_request_started method=%s path=%s",
+            request.method,
+            request.url.path,
+        )
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            duration_ms = round(
+                (time.perf_counter() - started_at) * 1000,
+                2,
+            )
+            logger.error(
+                "event=http_request_failed method=%s path=%s duration_ms=%s "
+                "error_type=%s",
+                request.method,
+                request.url.path,
+                duration_ms,
+                type(exc).__name__,
+            )
+            raise
+
+        duration_ms = round(
+            (time.perf_counter() - started_at) * 1000,
+            2,
+        )
+        response.headers["X-Request-ID"] = request_id
+        logger.info(
+            "event=http_request_completed method=%s path=%s "
+            "status_code=%s duration_ms=%s",
+            request.method,
+            request.url.path,
+            response.status_code,
+            duration_ms,
+        )
+        return response
 
 
 class AskRequest(BaseModel):

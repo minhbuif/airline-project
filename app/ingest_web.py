@@ -40,6 +40,13 @@ from tqdm import tqdm
 from app.config import settings
 from app.db import engine
 from app.embedder import VECTOR_SIZE, embed_text
+from app.logging_config import (
+    get_logger,
+    new_request_id,
+    set_request_id,
+    track_call,
+    tracked_operation,
+)
 
 
 DEFAULT_INPUT_PATH = Path("landing/web/crawled_pages.jsonl")
@@ -48,6 +55,7 @@ DEFAULT_COLLECTION = settings.QDRANT_WEB_COLLECTION
 CHUNK_SIZE = 2_500
 CHUNK_OVERLAP = 300
 QDRANT_BATCH_SIZE = 64
+logger = get_logger(__name__)
 
 
 class QdrantUpsertError(RuntimeError):
@@ -257,32 +265,47 @@ def read_jsonl(
     except OSError as exc:
         raise RuntimeError(f"Unable to open input file: {input_path}") from exc
 
-    with file:
-        for line_number, line in enumerate(file, start=1):
-            if not line.strip():
-                continue
+    with tracked_operation(
+        logger,
+        "web_jsonl_read",
+        path=input_path,
+        limit=limit,
+    ):
+        with file:
+            for line_number, line in enumerate(file, start=1):
+                if not line.strip():
+                    continue
 
-            try:
-                raw_record = json.loads(line)
-                record = validate_record(raw_record, line_number)
-            except (json.JSONDecodeError, ValueError, TypeError) as exc:
-                print(f"Skipping invalid line {line_number}: {exc}")
-                continue
+                try:
+                    raw_record = json.loads(line)
+                    record = validate_record(raw_record, line_number)
+                except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                    print(f"Skipping invalid line {line_number}: {exc}")
+                    logger.warning(
+                        "event=web_jsonl_line_skipped path=%s line_number=%s "
+                        "error_type=%s",
+                        input_path,
+                        line_number,
+                        type(exc).__name__,
+                    )
+                    continue
 
-            yield record
-            valid_count += 1
+                yield record
+                valid_count += 1
 
-            if limit is not None and valid_count >= limit:
-                break
+                if limit is not None and valid_count >= limit:
+                    break
 
 
+@track_call
 def create_schema() -> None:
     """Create the Postgres table and supporting indexes."""
     try:
-        with engine.begin() as connection:
-            connection.execute(CREATE_TABLE_SQL)
-            for statement in CREATE_INDEXES_SQL:
-                connection.execute(statement)
+        with tracked_operation(logger, "postgres_web_schema_setup"):
+            with engine.begin() as connection:
+                connection.execute(CREATE_TABLE_SQL)
+                for statement in CREATE_INDEXES_SQL:
+                    connection.execute(statement)
     except SQLAlchemyError as exc:
         raise RuntimeError(
             "Unable to create the web_documents Postgres schema."
@@ -294,9 +317,15 @@ def create_schema() -> None:
 def upsert_document(record: dict[str, Any]) -> int:
     """Insert or update one source document and return its Postgres ID."""
     try:
-        with engine.begin() as connection:
-            result = connection.execute(UPSERT_DOCUMENT_SQL, record)
-            return int(result.scalar_one())
+        with tracked_operation(
+            logger,
+            "postgres_web_document_upsert",
+            level=10,
+            source_url=record.get("source_url", "unknown"),
+        ):
+            with engine.begin() as connection:
+                result = connection.execute(UPSERT_DOCUMENT_SQL, record)
+                return int(result.scalar_one())
     except SQLAlchemyError as exc:
         raise RuntimeError(
             f"Unable to upsert web document: {record.get('source_url')}"
@@ -379,15 +408,20 @@ def reset_web_data(
 ) -> None:
     """Remove previously ingested web rows and vectors for a clean rebuild."""
     try:
-        existing_names = {
-            collection.name
-            for collection in client.get_collections().collections
-        }
-        if collection_name in existing_names:
-            client.delete_collection(collection_name=collection_name)
+        with tracked_operation(
+            logger,
+            "web_data_reset",
+            collection=collection_name,
+        ):
+            existing_names = {
+                collection.name
+                for collection in client.get_collections().collections
+            }
+            if collection_name in existing_names:
+                client.delete_collection(collection_name=collection_name)
 
-        with engine.begin() as connection:
-            connection.execute(DELETE_WEB_DOCUMENTS_SQL)
+            with engine.begin() as connection:
+                connection.execute(DELETE_WEB_DOCUMENTS_SQL)
     except Exception as exc:
         raise RuntimeError(
             "Unable to reset existing web ingestion data."
@@ -410,22 +444,27 @@ def ensure_qdrant_collection(
 ) -> None:
     """Ensure the target Qdrant collection exists."""
     try:
-        existing_names = {
-            collection.name
-            for collection in client.get_collections().collections
-        }
+        with tracked_operation(
+            logger,
+            "qdrant_collection_setup",
+            collection=collection_name,
+        ):
+            existing_names = {
+                collection.name
+                for collection in client.get_collections().collections
+            }
 
-        if collection_name in existing_names:
-            print(f"Qdrant collection ready: {collection_name}")
-            return
+            if collection_name in existing_names:
+                print(f"Qdrant collection ready: {collection_name}")
+                return
 
-        client.create_collection(
-            collection_name=collection_name,
-            vectors_config=VectorParams(
-                size=VECTOR_SIZE,
-                distance=Distance.COSINE,
-            ),
-        )
+            client.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(
+                    size=VECTOR_SIZE,
+                    distance=Distance.COSINE,
+                ),
+            )
     except Exception as exc:
         raise RuntimeError(
             f"Unable to inspect or create Qdrant collection {collection_name!r}."
@@ -446,11 +485,17 @@ def flush_points(
     count = len(points)
 
     try:
-        client.upsert(
-            collection_name=collection_name,
-            points=points,
-            wait=True,
-        )
+        with tracked_operation(
+            logger,
+            "qdrant_points_upsert",
+            collection=collection_name,
+            point_count=count,
+        ):
+            client.upsert(
+                collection_name=collection_name,
+                points=points,
+                wait=True,
+            )
     except Exception as exc:
         raise QdrantUpsertError(
             f"Unable to upsert {count} points into {collection_name!r}."
@@ -460,10 +505,12 @@ def flush_points(
     return count
 
 
+@track_call
 def main() -> None:
     """Run the end-to-end web-document ingestion pipeline."""
     args = parse_args()
     collection_name = DEFAULT_COLLECTION
+    set_request_id(new_request_id("web-ingest"))
 
     print("Starting web-document ingestion")
     print(f"Input: {args.input}")
@@ -471,6 +518,14 @@ def main() -> None:
     print(f"Chunk size: {CHUNK_SIZE}")
     print(f"Chunk overlap: {CHUNK_OVERLAP}")
     print()
+    logger.info(
+        "event=web_ingestion_started input_path=%s collection=%s "
+        "replace_existing=%s limit=%s",
+        args.input,
+        collection_name,
+        args.replace,
+        args.limit,
+    )
 
     create_schema()
 
@@ -551,6 +606,11 @@ def main() -> None:
         except Exception as exc:
             failed_documents += 1
             print(f"\nFailed document {record.get('source_url')}: {exc}")
+            logger.error(
+                "event=web_document_failed source_url=%s error_type=%s",
+                record.get("source_url", "unknown"),
+                type(exc).__name__,
+            )
 
     points_upserted += flush_points(
         qdrant,
@@ -565,6 +625,16 @@ def main() -> None:
     print(f"Qdrant points upserted: {points_upserted}")
     print(f"Failed documents: {failed_documents}")
     print(f"Collection: {collection_name}")
+    logger.info(
+        "event=web_ingestion_completed documents_processed=%s "
+        "chunks_prepared=%s points_upserted=%s failed_documents=%s "
+        "collection=%s",
+        documents_processed,
+        chunks_prepared,
+        points_upserted,
+        failed_documents,
+        collection_name,
+    )
 
 
 if __name__ == "__main__":

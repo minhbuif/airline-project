@@ -14,8 +14,13 @@ else:
     GENAI_IMPORT_ERROR = None
 
 from app.config import settings
+from app.logging_config import get_logger, track_call, tracked_operation
 
 
+logger = get_logger(__name__)
+
+
+@track_call
 def get_client() -> Any:
     """Validate the Gemini configuration and create an SDK client."""
     if genai is None:
@@ -31,15 +36,21 @@ def get_client() -> Any:
         )
 
     try:
-        return genai.Client(
-            api_key=settings.GEMINI_API_KEY,
-        )
+        with tracked_operation(
+            logger,
+            "gemini_client_initialization",
+            model=settings.GEMINI_MODEL,
+        ):
+            return genai.Client(
+                api_key=settings.GEMINI_API_KEY,
+            )
     except Exception as exc:
         raise RuntimeError(
             f"Unable to initialize the Gemini client: {exc}"
         ) from exc
 
 
+@track_call
 def generate_answer(prompt: str) -> str:
     """Send a prompt to Gemini and return a non-empty text response."""
     if not isinstance(prompt, str) or not prompt.strip():
@@ -50,10 +61,16 @@ def generate_answer(prompt: str) -> str:
     # Convert SDK and network failures into an application-level error that the
     # Streamlit UI can display through its existing try/except block.
     try:
-        interaction = client.interactions.create(
+        with tracked_operation(
+            logger,
+            "gemini_interaction",
             model=settings.GEMINI_MODEL,
-            input=prompt,
-        )
+            input_characters=len(prompt),
+        ):
+            interaction = client.interactions.create(
+                model=settings.GEMINI_MODEL,
+                input=prompt,
+            )
     except Exception as exc:
         raise RuntimeError(
             f"Gemini API request failed: {exc}"
@@ -72,4 +89,9 @@ def generate_answer(prompt: str) -> str:
             "Gemini returned an empty response."
         )
 
-    return answer.strip()
+    cleaned_answer = answer.strip()
+    logger.info(
+        "event=gemini_response_received answer_characters=%s",
+        len(cleaned_answer),
+    )
+    return cleaned_answer

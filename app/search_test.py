@@ -1,10 +1,22 @@
 """Command-line smoke test for combined dataset and web retrieval."""
 
+from app.logging_config import (
+    get_logger,
+    new_request_id,
+    set_request_id,
+    track_call,
+)
 from app.retriever import retrieve_reviews
 
 
+logger = get_logger(__name__)
+
+
+@track_call
 def search(query: str, limit: int = 5) -> None:
     """Print the highest-ranked sources returned by the application retriever."""
+    set_request_id(new_request_id("search"))
+    logger.info("event=search_test_started result_limit=%s", limit)
     results = retrieve_reviews(query=query, limit=limit)
 
     if not results:
@@ -25,6 +37,8 @@ def search(query: str, limit: int = 5) -> None:
         print(f"Recommended: {result.get('recommended')}")
         print()
         print(str(result.get("text") or "")[:1000])
+
+    logger.info("event=search_test_completed result_count=%s", len(results))
 
 
 if __name__ == "__main__":

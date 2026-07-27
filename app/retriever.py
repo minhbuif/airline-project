@@ -9,9 +9,11 @@ from qdrant_client import QdrantClient
 
 from app.config import settings
 from app.embedder import embed_text
+from app.logging_config import get_logger, track_call, tracked_operation
 
 
 MAX_CHUNKS_PER_WEB_PAGE = 2
+logger = get_logger(__name__)
 
 
 def _query_collection(
@@ -21,12 +23,18 @@ def _query_collection(
     limit: int,
 ) -> list[Any]:
     """Query one existing collection and return its scored points."""
-    response = client.query_points(
-        collection_name=collection_name,
-        query=query_vector,
+    with tracked_operation(
+        logger,
+        "qdrant_collection_query",
+        collection=collection_name,
         limit=limit,
-        with_payload=True,
-    )
+    ):
+        response = client.query_points(
+            collection_name=collection_name,
+            query=query_vector,
+            limit=limit,
+            with_payload=True,
+        )
     return list(response.points)
 
 
@@ -95,6 +103,7 @@ def _select_diverse_results(
     return selected
 
 
+@track_call
 def retrieve_reviews(query: str, limit: int = 5) -> list[dict]:
     """Retrieve and merge relevant dataset reviews and crawled web chunks."""
     if not isinstance(query, str) or not query.strip():
@@ -112,10 +121,16 @@ def retrieve_reviews(query: str, limit: int = 5) -> list[dict]:
             port=settings.QDRANT_PORT,
         )
         query_vector = embed_text(query)
-        existing_names = {
-            collection.name
-            for collection in client.get_collections().collections
-        }
+        with tracked_operation(
+            logger,
+            "qdrant_collection_list",
+            host=settings.QDRANT_HOST,
+            port=settings.QDRANT_PORT,
+        ):
+            existing_names = {
+                collection.name
+                for collection in client.get_collections().collections
+            }
     except (ValueError, RuntimeError):
         raise
     except Exception as exc:
@@ -160,4 +175,12 @@ def retrieve_reviews(query: str, limit: int = 5) -> list[dict]:
             + "; ".join(query_errors)
         )
 
-    return _select_diverse_results(candidates, limit)
+    selected = _select_diverse_results(candidates, limit)
+    logger.info(
+        "event=retrieval_completed candidate_count=%s result_count=%s "
+        "collections=%s",
+        len(candidates),
+        len(selected),
+        ",".join(sorted(existing_names)),
+    )
+    return selected

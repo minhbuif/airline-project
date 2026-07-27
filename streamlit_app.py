@@ -2,7 +2,11 @@
 
 import streamlit as st
 
+from app.logging_config import get_logger, new_request_id, set_request_id
 from app.rag import answer_question
+
+
+logger = get_logger(__name__)
 
 
 st.set_page_config(
@@ -55,6 +59,13 @@ with st.sidebar:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Streamlit reruns this file after each interaction. Reuse one identifier so
+# every log entry from the same browser session can be followed together.
+if "_log_session_id" not in st.session_state:
+    st.session_state._log_session_id = new_request_id("ui")
+
+set_request_id(st.session_state._log_session_id)
+
 
 # Replay chat history on every Streamlit rerun.
 for message in st.session_state.messages:
@@ -79,6 +90,11 @@ Score: {source.get("score", 0):.3f}
 if prompt := st.chat_input(
     "Ask about passenger experience..."
 ):
+    logger.info(
+        "event=streamlit_question_submitted airline=%s source_limit=%s",
+        selected_airline,
+        top_k,
+    )
     # Save the visible user message before adding any internal airline filter.
     st.session_state.messages.append({
         "role": "user",
@@ -138,6 +154,10 @@ if prompt := st.chat_input(
                     "content": result["answer"],
                     "sources": result["sources"],
                 })
+                logger.info(
+                    "event=streamlit_answer_displayed source_count=%s",
+                    len(result["sources"]),
+                )
 
             except Exception as exc:
                 # Keep the chat usable and display contextual errors raised by
@@ -152,3 +172,7 @@ if prompt := st.chat_input(
                     "role": "assistant",
                     "content": error_message,
                 })
+                logger.error(
+                    "event=streamlit_answer_failed error_type=%s",
+                    type(exc).__name__,
+                )

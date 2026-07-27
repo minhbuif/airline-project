@@ -445,6 +445,7 @@ airline-project/
 │   ├── ingest.py          Spreadsheet dataset ingestion
 │   ├── ingest_web.py      Crawled web-document ingestion
 │   ├── llm.py             Gemini client and answer generation
+│   ├── logging_config.py  Rotating logs and safe call tracing
 │   ├── rag.py             Prompt construction and RAG orchestration
 │   ├── retriever.py       Combined Qdrant search
 │   └── search_test.py     Command-line retrieval smoke test
@@ -478,9 +479,55 @@ airline-project/
 | `QDRANT_COLLECTION` | Dataset vector collection | `airline_reviews` |
 | `QDRANT_WEB_COLLECTION` | Web vector collection | `airline_web_documents` |
 | `LANDING_PATH` | Spreadsheet input directory | `./landing` |
+| `LOG_LEVEL` | Log detail (`INFO` or `DEBUG`) | `INFO` |
+| `LOG_FILE` | Rotating application log path | `logs/airline_app.log` |
+| `LOG_MAX_BYTES` | Maximum size of each log file | `5242880` |
+| `LOG_BACKUP_COUNT` | Number of rotated files to retain | `5` |
 
 The `.env.docker` file uses Docker service names such as `postgres` and
 `qdrant` instead of `localhost`.
+
+## Application logs and call tracking
+
+The application automatically records useful operational events in both the
+terminal and a rotating log file:
+
+```text
+logs/airline_app.log
+```
+
+The logs show:
+
+- incoming FastAPI requests, response status codes, and durations;
+- application function calls and the filename and line that called them;
+- Gemini, Firecrawl, Qdrant, and Postgres operations;
+- dataset, YAML, and JSONL file reads and writes;
+- crawler and ingestion totals, failures, and timings;
+- a `request_id` that connects all messages from one API request, Streamlit
+  browser session, crawl, or ingestion job.
+
+Follow the log while the application is running:
+
+```bash
+tail -f logs/airline_app.log
+```
+
+Find only calls, external operations, or HTTP requests:
+
+```bash
+rg 'event=(call|operation|http)_' logs/airline_app.log
+```
+
+At the default `INFO` level, repetitive per-review inserts and embeddings are
+not logged individually. Use `LOG_LEVEL=DEBUG` temporarily when that detail is
+needed. Logs rotate at 5 MB and keep five older files, such as
+`airline_app.log.1`, so they cannot grow forever.
+
+Prompts, review text, API keys, passwords, authorization headers, function
+arguments, and function results are not logged. Keep the `logs/` directory
+private anyway; it can still contain filenames, source URLs, airline names,
+error types, and service metadata. The directory and `*.log` files are
+ignored by Git.
 
 ## Common problems
 

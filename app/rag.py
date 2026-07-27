@@ -1,10 +1,12 @@
 """Retrieval-augmented prompt construction and answer orchestration."""
 
 from app.llm import generate_answer
+from app.logging_config import get_logger, track_call
 from app.retriever import retrieve_reviews
 
 
 MAX_REVIEW_CHARACTERS = 3000
+logger = get_logger(__name__)
 
 
 def format_context(reviews: list[dict]) -> str:
@@ -83,6 +85,7 @@ ANSWER:
 """.strip()
 
 
+@track_call
 def prepare_rag_input(
     question: str,
     limit: int = 5,
@@ -116,6 +119,14 @@ def prepare_rag_input(
     context = format_context(reviews)
     prompt = build_prompt(question, context)
 
+    logger.info(
+        "event=rag_input_prepared source_count=%s context_characters=%s "
+        "prompt_characters=%s",
+        len(reviews),
+        len(context),
+        len(prompt),
+    )
+
     return {
         "question": question,
         "retrieved_reviews": reviews,
@@ -124,6 +135,7 @@ def prepare_rag_input(
     }
 
 
+@track_call
 def answer_question(
     question: str,
     limit: int = 5,
@@ -159,8 +171,14 @@ def answer_question(
             **review,
         })
 
-    return {
+    result = {
         "question": question,
         "answer": answer,
         "sources": sources,
     }
+    logger.info(
+        "event=rag_answer_completed source_count=%s answer_characters=%s",
+        len(sources),
+        len(answer),
+    )
+    return result

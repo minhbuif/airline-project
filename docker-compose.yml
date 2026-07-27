@@ -33,9 +33,9 @@ services:
       - .env.docker
     volumes:
       - ./landing:/app/landing
+      - ./logs:/app/logs
     command: ["python", "-m", "app.ingest"]
 
 volumes:
   postgres_data:
   qdrant_data:
-

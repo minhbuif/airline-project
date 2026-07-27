@@ -12,6 +12,16 @@ from tqdm import tqdm
 from app.config import settings
 from app.db import insert_review, test_postgres_connection
 from app.embedder import VECTOR_SIZE, embed_text
+from app.logging_config import (
+    get_logger,
+    new_request_id,
+    set_request_id,
+    track_call,
+    tracked_operation,
+)
+
+
+logger = get_logger(__name__)
 
 
 class QdrantUpsertError(RuntimeError):
@@ -34,7 +44,9 @@ def find_dataset_file() -> str:
             f"No .xlsx or .csv file found in landing path: {settings.LANDING_PATH}"
         )
 
-    return files[0]
+    selected_file = files[0]
+    logger.info("event=dataset_file_selected path=%s", selected_file)
+    return selected_file
 
 
 def load_dataset(file_path: str) -> pd.DataFrame:
@@ -42,11 +54,17 @@ def load_dataset(file_path: str) -> pd.DataFrame:
     suffix = os.path.splitext(file_path)[1].lower()
 
     try:
-        if suffix == ".xlsx":
-            return pd.read_excel(file_path)
+        with tracked_operation(
+            logger,
+            "dataset_file_read",
+            path=file_path,
+            file_type=suffix,
+        ):
+            if suffix == ".xlsx":
+                return pd.read_excel(file_path)
 
-        if suffix == ".csv":
-            return pd.read_csv(file_path)
+            if suffix == ".csv":
+                return pd.read_csv(file_path)
     except (ImportError, OSError, ValueError) as exc:
         raise RuntimeError(f"Unable to load dataset: {file_path}") from exc
 
@@ -176,27 +194,33 @@ Review:
 """.strip()
 
 
+@track_call
 def setup_qdrant_collection(client: QdrantClient) -> None:
     """Create the configured vector collection when it does not exist."""
     try:
-        collections = client.get_collections().collections
-        existing_names = [collection.name for collection in collections]
+        with tracked_operation(
+            logger,
+            "qdrant_collection_setup",
+            collection=settings.QDRANT_COLLECTION,
+        ):
+            collections = client.get_collections().collections
+            existing_names = [collection.name for collection in collections]
 
-        if settings.QDRANT_COLLECTION not in existing_names:
-            print(f"Creating Qdrant collection: {settings.QDRANT_COLLECTION}")
+            if settings.QDRANT_COLLECTION not in existing_names:
+                print(f"Creating Qdrant collection: {settings.QDRANT_COLLECTION}")
 
-            client.create_collection(
-                collection_name=settings.QDRANT_COLLECTION,
-                vectors_config=VectorParams(
-                    size=VECTOR_SIZE,
-                    distance=Distance.COSINE
-                ),
-            )
-        else:
-            print(
-                "Qdrant collection already exists: "
-                f"{settings.QDRANT_COLLECTION}"
-            )
+                client.create_collection(
+                    collection_name=settings.QDRANT_COLLECTION,
+                    vectors_config=VectorParams(
+                        size=VECTOR_SIZE,
+                        distance=Distance.COSINE
+                    ),
+                )
+            else:
+                print(
+                    "Qdrant collection already exists: "
+                    f"{settings.QDRANT_COLLECTION}"
+                )
     except Exception as exc:
         raise RuntimeError(
             "Unable to inspect or create the Qdrant collection."
@@ -212,20 +236,29 @@ def upsert_points(
         return
 
     try:
-        client.upsert(
-            collection_name=settings.QDRANT_COLLECTION,
-            points=points,
-            wait=True,
-        )
+        with tracked_operation(
+            logger,
+            "qdrant_points_upsert",
+            collection=settings.QDRANT_COLLECTION,
+            point_count=len(points),
+        ):
+            client.upsert(
+                collection_name=settings.QDRANT_COLLECTION,
+                points=points,
+                wait=True,
+            )
     except Exception as exc:
         raise QdrantUpsertError(
             f"Unable to upsert a batch of {len(points)} Qdrant points."
         ) from exc
 
 
+@track_call
 def main() -> None:
     """Run the end-to-end passenger-review ingestion pipeline."""
+    set_request_id(new_request_id("ingest"))
     print("Starting airline review ingestion...")
+    logger.info("event=dataset_ingestion_started")
 
     test_postgres_connection()
 
@@ -233,6 +266,12 @@ def main() -> None:
     print(f"Dataset file found: {file_path}")
 
     df = load_dataset(file_path)
+    logger.info(
+        "event=dataset_loaded path=%s row_count=%s column_count=%s",
+        file_path,
+        len(df),
+        len(df.columns),
+    )
     print(f"Loaded rows: {len(df)}")
     print("Columns:", list(df.columns))
 
@@ -304,6 +343,11 @@ def main() -> None:
         except Exception as exc:
             failed_count += 1
             print(f"Failed source row {idx}: {exc}")
+            logger.error(
+                "event=dataset_row_failed source_row_id=%s error_type=%s",
+                idx,
+                type(exc).__name__,
+            )
 
     if points:
         upsert_points(qdrant, points)
@@ -313,6 +357,13 @@ def main() -> None:
     print(f"Inserted rows: {inserted_count}")
     print(f"Skipped rows: {skipped_count}")
     print(f"Failed rows: {failed_count}")
+    logger.info(
+        "event=dataset_ingestion_completed inserted_count=%s "
+        "skipped_count=%s failed_count=%s",
+        inserted_count,
+        skipped_count,
+        failed_count,
+    )
 
 
 if __name__ == "__main__":

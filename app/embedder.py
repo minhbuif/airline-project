@@ -2,6 +2,12 @@
 
 from typing import Any
 
+from app.logging_config import (
+    get_logger,
+    track_call_debug,
+    tracked_operation,
+)
+
 # Defer a missing/incompatible dependency error until an embedding is needed,
 # allowing API and UI modules to import and show an actionable message.
 try:
@@ -16,8 +22,10 @@ MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 VECTOR_SIZE = 384
 
 _model: Any = None
+logger = get_logger(__name__)
 
 
+@track_call_debug
 def get_model() -> Any:
     """Load and cache the embedding model on first use."""
     global _model
@@ -32,7 +40,12 @@ def get_model() -> Any:
         print(f"Loading embedding model: {MODEL_NAME}")
 
         try:
-            _model = SentenceTransformer(MODEL_NAME)
+            with tracked_operation(
+                logger,
+                "embedding_model_load",
+                model=MODEL_NAME,
+            ):
+                _model = SentenceTransformer(MODEL_NAME)
         except Exception as exc:
             raise RuntimeError(
                 f"Unable to load embedding model {MODEL_NAME!r}."
@@ -41,6 +54,7 @@ def get_model() -> Any:
     return _model
 
 
+@track_call_debug
 def embed_text(text: str) -> list[float]:
     """Convert non-empty text into a normalized embedding vector."""
     if not isinstance(text, str) or not text.strip():
@@ -49,8 +63,15 @@ def embed_text(text: str) -> list[float]:
     model = get_model()
 
     try:
-        vector = model.encode(text, normalize_embeddings=True)
-        values = vector.tolist()
+        with tracked_operation(
+            logger,
+            "text_embedding",
+            level=10,
+            model=MODEL_NAME,
+            input_characters=len(text),
+        ):
+            vector = model.encode(text, normalize_embeddings=True)
+            values = vector.tolist()
     except Exception as exc:
         raise RuntimeError("Unable to generate the text embedding.") from exc
 
