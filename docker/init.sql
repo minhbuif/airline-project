@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS airline_reviews (
     id SERIAL PRIMARY KEY,
     source_row_id TEXT,
+    review_hash CHAR(64) NOT NULL,
     airline_name TEXT,
     title TEXT,
     review_text TEXT,
@@ -14,5 +15,6 @@ CREATE TABLE IF NOT EXISTS airline_reviews (
     recommended TEXT,
     aircraft TEXT,
     overall_rating FLOAT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_airline_reviews_review_hash UNIQUE (review_hash)
 );

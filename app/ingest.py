@@ -2,7 +2,6 @@
 
 import glob
 import os
-import uuid
 
 import pandas as pd
 from qdrant_client import QdrantClient
@@ -10,14 +9,22 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 from tqdm import tqdm
 
 from app.config import settings
-from app.db import insert_review, test_postgres_connection
-from app.embedder import VECTOR_SIZE, embed_text
+from app.db import (
+    ensure_review_identity_schema,
+    insert_review,
+    test_postgres_connection,
+)
+from app.embedder import VECTOR_SIZE, embed_text, get_model
 from app.logging_config import (
     get_logger,
     new_request_id,
     set_request_id,
     track_call,
     tracked_operation,
+)
+from app.review_identity import (
+    build_review_hash,
+    deterministic_review_point_id,
 )
 
 
@@ -196,7 +203,7 @@ Review:
 
 @track_call
 def setup_qdrant_collection(client: QdrantClient) -> None:
-    """Create the configured vector collection when it does not exist."""
+    """Rebuild the dataset collection to remove stale or legacy vectors."""
     try:
         with tracked_operation(
             logger,
@@ -206,24 +213,26 @@ def setup_qdrant_collection(client: QdrantClient) -> None:
             collections = client.get_collections().collections
             existing_names = [collection.name for collection in collections]
 
-            if settings.QDRANT_COLLECTION not in existing_names:
-                print(f"Creating Qdrant collection: {settings.QDRANT_COLLECTION}")
-
-                client.create_collection(
-                    collection_name=settings.QDRANT_COLLECTION,
-                    vectors_config=VectorParams(
-                        size=VECTOR_SIZE,
-                        distance=Distance.COSINE
-                    ),
-                )
-            else:
+            if settings.QDRANT_COLLECTION in existing_names:
                 print(
-                    "Qdrant collection already exists: "
+                    "Rebuilding Qdrant collection: "
                     f"{settings.QDRANT_COLLECTION}"
                 )
+                client.delete_collection(
+                    collection_name=settings.QDRANT_COLLECTION,
+                )
+
+            client.create_collection(
+                collection_name=settings.QDRANT_COLLECTION,
+                vectors_config=VectorParams(
+                    size=VECTOR_SIZE,
+                    distance=Distance.COSINE
+                ),
+            )
+            print(f"Qdrant collection ready: {settings.QDRANT_COLLECTION}")
     except Exception as exc:
         raise RuntimeError(
-            "Unable to inspect or create the Qdrant collection."
+            "Unable to rebuild the Qdrant dataset collection."
         ) from exc
 
 
@@ -260,8 +269,6 @@ def main() -> None:
     print("Starting airline review ingestion...")
     logger.info("event=dataset_ingestion_started")
 
-    test_postgres_connection()
-
     file_path = find_dataset_file()
     print(f"Dataset file found: {file_path}")
 
@@ -278,6 +285,16 @@ def main() -> None:
     df = df.drop_duplicates()
     print(f"Rows after exact duplicate removal: {len(df)}")
 
+    # Complete dependency and input checks before rebuilding vector storage.
+    test_postgres_connection()
+    duplicates_removed = ensure_review_identity_schema()
+    if duplicates_removed:
+        print(
+            "Removed legacy duplicate Postgres rows: "
+            f"{duplicates_removed}"
+        )
+    get_model()
+
     qdrant = QdrantClient(
         host=settings.QDRANT_HOST,
         port=settings.QDRANT_PORT,
@@ -287,9 +304,11 @@ def main() -> None:
 
     # Batch vector writes to reduce Qdrant network overhead.
     points: list[PointStruct] = []
-    inserted_count = 0
+    upserted_count = 0
     skipped_count = 0
+    duplicate_count = 0
     failed_count = 0
+    seen_review_hashes: set[str] = set()
 
     for idx, row in tqdm(df.iterrows(), total=len(df)):
         try:
@@ -297,6 +316,11 @@ def main() -> None:
 
             if not item["review_text"]:
                 skipped_count += 1
+                continue
+
+            item["review_hash"] = build_review_hash(item)
+            if item["review_hash"] in seen_review_hashes:
+                duplicate_count += 1
                 continue
 
             postgres_id = insert_review(item)
@@ -307,6 +331,7 @@ def main() -> None:
             payload = {
                 "postgres_id": postgres_id,
                 "source_row_id": item["source_row_id"],
+                "review_hash": item["review_hash"],
                 "airline_name": item["airline_name"],
                 "title": item["title"],
                 "country": item["country"],
@@ -324,13 +349,16 @@ def main() -> None:
 
             points.append(
                 PointStruct(
-                    id=str(uuid.uuid4()),
+                    id=deterministic_review_point_id(
+                        item["review_hash"],
+                    ),
                     vector=vector,
                     payload=payload,
                 )
             )
+            seen_review_hashes.add(item["review_hash"])
 
-            inserted_count += 1
+            upserted_count += 1
 
             if len(points) >= 100:
                 upsert_points(qdrant, points)
@@ -354,14 +382,16 @@ def main() -> None:
         points.clear()
 
     print("Ingestion completed.")
-    print(f"Inserted rows: {inserted_count}")
+    print(f"Upserted rows: {upserted_count}")
     print(f"Skipped rows: {skipped_count}")
+    print(f"Duplicate input rows: {duplicate_count}")
     print(f"Failed rows: {failed_count}")
     logger.info(
-        "event=dataset_ingestion_completed inserted_count=%s "
-        "skipped_count=%s failed_count=%s",
-        inserted_count,
+        "event=dataset_ingestion_completed upserted_count=%s "
+        "skipped_count=%s duplicate_count=%s failed_count=%s",
+        upserted_count,
         skipped_count,
+        duplicate_count,
         failed_count,
     )
 

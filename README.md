@@ -191,11 +191,17 @@ python -m app.ingest
 ```
 
 This loads structured reviews into Postgres, creates embeddings, and writes
-them to the `airline_reviews` Qdrant collection.
+them to the `airline_reviews` Qdrant collection. It is safe to run repeatedly:
 
-> **Important:** dataset ingestion is not currently idempotent. Running it
-> repeatedly can create duplicate Postgres rows and Qdrant points. Run it once
-> for initial setup unless you have intentionally cleared the dataset storage.
+- each normalized review receives a stable content hash;
+- Postgres updates a matching review instead of inserting another row;
+- the first run after this feature was added removes legacy Postgres
+  duplicates;
+- the dataset Qdrant collection is rebuilt with stable point IDs, removing
+  stale vectors and duplicates from earlier ingestion runs.
+
+Only the dataset vector collection is rebuilt. Crawled web documents in
+`airline_web_documents` are not affected.
 
 ### 7. Crawl web sources
 
@@ -644,7 +650,8 @@ docker compose down -v
 
 ## Current limitations
 
-- Dataset ingestion can create duplicates when rerun.
+- Spreadsheet ingestion rebuilds the dataset vector collection, so an
+  interrupted run should be rerun before using dataset search.
 - Web collection quality depends on third-party page availability and markup.
 - Some sources may temporarily return bot-verification or access-denied pages.
 - The crawler collects a bounded recent sample, not every historical review.
