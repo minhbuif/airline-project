@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS airline_reviews (
     id SERIAL PRIMARY KEY,
     source_row_id TEXT,
     review_hash CHAR(64) NOT NULL,
+    review_summary TEXT,
     airline_name TEXT,
     title TEXT,
     review_text TEXT,

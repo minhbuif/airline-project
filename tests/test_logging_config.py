@@ -18,16 +18,19 @@ class LoggingConfigTests(unittest.TestCase):
         fields = format_fields(
             api_key="secret-key",
             prompt="private passenger question",
+            review_summary="private summary",
             review_text="private review",
             path="landing/reviews.csv",
         )
 
         self.assertIn("api_key=<redacted>", fields)
         self.assertIn("prompt=<redacted>", fields)
+        self.assertIn("review_summary=<redacted>", fields)
         self.assertIn("review_text=<redacted>", fields)
         self.assertIn("path=landing/reviews.csv", fields)
         self.assertNotIn("secret-key", fields)
         self.assertNotIn("private passenger question", fields)
+        self.assertNotIn("private summary", fields)
 
     def test_request_context_is_temporary(self) -> None:
         original_id = request_id_context.get()

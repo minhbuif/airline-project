@@ -27,6 +27,7 @@ SENSITIVE_FIELD_MARKERS = (
     "password",
     "prompt",
     "question",
+    "review_summary",
     "review_text",
     "secret",
     "text",

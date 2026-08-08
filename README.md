@@ -46,21 +46,26 @@ Source URLs and crawl limits are configured in
 ## How the project works
 
 ```text
-Dataset spreadsheet ──→ Postgres airline_reviews ──→ Qdrant airline_reviews
-                                                       │
-Web source pages ─────→ Postgres web_documents ─────→ Qdrant airline_web_documents
-                                                       │
-User question ────────→ embedding ─────────────────────┘
-                                                       │
-                                  combined similarity search
-                                                       │
-                                    evidence sent to Gemini
-                                                       │
-                                      answer + sources
+Dataset spreadsheet ──→ ingest.py ──┬─→ Postgres airline_reviews
+                                    ├─→ Qdrant airline_reviews
+                                    └─→ Neo4j relationship graph
+
+Web source pages ──→ ingest_web.py ─┬─→ Postgres web_documents
+                                    └─→ Qdrant airline_web_documents
+
+User question ──→ embedding ──→ combined Qdrant similarity search
+                                      │
+                                      ↓
+                              evidence sent to Gemini
+                                      │
+                                      ↓
+                               answer + sources
 ```
 
 The original structured records are kept in Postgres. Their embedding vectors
-are kept in Qdrant for semantic search.
+are kept in Qdrant for semantic search. Neo4j stores dataset reviews as a graph
+connected to airlines, routes, aircraft, countries, traveller types, and seat
+types for fast relationship and aggregate queries.
 
 ## Quick start for an existing setup
 
@@ -70,7 +75,7 @@ to start the application:
 ```bash
 cd /Users/minhbui/Documents/GitHub/airline-project
 source .venv/bin/activate
-docker compose up -d postgres qdrant
+docker compose up -d postgres qdrant neo4j
 python -m streamlit run streamlit_app.py
 ```
 
@@ -83,6 +88,7 @@ Install these before starting:
 
 - Python 3.11 or newer
 - Docker Desktop or another Docker Compose installation
+- Neo4j is supplied by Docker Compose; no separate installation is required
 - A Gemini API key for generated answers
 - A Firecrawl API key for collecting web sources
 
@@ -159,21 +165,28 @@ QDRANT_PORT=6333
 QDRANT_COLLECTION=airline_reviews
 QDRANT_WEB_COLLECTION=airline_web_documents
 
+NEO4J_ENABLED=true
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=airline_graph_pass
+NEO4J_DATABASE=neo4j
+
 LANDING_PATH=./landing
 ```
 
 Never commit `.env` or share real API keys. The file is ignored by Git.
 
-### 5. Start Postgres and Qdrant
+### 5. Start Postgres, Qdrant, and Neo4j
 
 Make sure Docker Desktop is running, then execute:
 
 ```bash
-docker compose up -d postgres qdrant
+docker compose up -d postgres qdrant neo4j
 docker compose ps
 ```
 
-You should see `airline_postgres` and `airline_qdrant` running.
+You should see `airline_postgres`, `airline_qdrant`, and `airline_neo4j`
+running.
 
 ### 6. Ingest the spreadsheet dataset
 
@@ -193,15 +206,27 @@ python -m app.ingest
 This loads structured reviews into Postgres, creates embeddings, and writes
 them to the `airline_reviews` Qdrant collection. It is safe to run repeatedly:
 
+- a deterministic extractive summary highlights representative sentences from
+  each review without making an additional Gemini API call;
+- the summary is placed before the full review when creating the embedding, so
+  important themes remain prominent in long reviews;
 - each normalized review receives a stable content hash;
 - Postgres updates a matching review instead of inserting another row;
 - the first run after this feature was added removes legacy Postgres
   duplicates;
 - the dataset Qdrant collection is rebuilt with stable point IDs, removing
   stale vectors and duplicates from earlier ingestion runs.
+- when `NEO4J_ENABLED=true`, reviews are also batch-merged into a graph with
+  index-backed unique identities and relationships to airlines, routes,
+  aircraft, countries, traveller types, and seat types.
 
 Only the dataset vector collection is rebuilt. Crawled web documents in
 `airline_web_documents` are not affected.
+
+The summary is extractive rather than generative: every summary sentence comes
+from the original review. This keeps ingestion reproducible, avoids
+hallucinated details, and adds very little runtime compared with embedding the
+review itself.
 
 ### 7. Crawl web sources
 
@@ -278,7 +303,7 @@ To replace the previous crawl with current pages and rebuild the web index:
 
 ```bash
 source .venv/bin/activate
-docker compose up -d postgres qdrant
+docker compose up -d postgres qdrant neo4j
 python -m app.crawl_sources
 python -m app.ingest_web --replace
 ```
@@ -340,6 +365,7 @@ Available endpoints:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` | Confirm the API process is running |
+| `GET` | `/graph/airlines/{airline_name}` | Return Neo4j relationship statistics |
 | `POST` | `/search` | Retrieve relevant sources without Gemini |
 | `POST` | `/ask` | Retrieve sources and generate a Gemini answer |
 
@@ -356,7 +382,7 @@ Stop Streamlit or Uvicorn with `Ctrl+C`.
 
 ## Running automated tests
 
-The tests do not call Firecrawl, Gemini, Postgres, or Qdrant.
+The tests do not call Firecrawl, Gemini, Postgres, Qdrant, or Neo4j.
 
 ```bash
 python -m unittest discover -v
@@ -438,6 +464,40 @@ curl -s -X POST \
   -d '{"exact": true}'
 ```
 
+### Neo4j
+
+Open Neo4j Browser:
+
+```text
+http://localhost:7474
+```
+
+Sign in with the configured `NEO4J_USER` and `NEO4J_PASSWORD`. To visualize a
+sample of the review graph, run:
+
+```cypher
+MATCH path=(review:DatasetReview)-[relationship]->(dimension)
+RETURN path
+LIMIT 50;
+```
+
+Query one airline's connected routes and review counts:
+
+```cypher
+MATCH (review:DatasetReview)-[:ABOUT_AIRLINE]->
+      (:Airline {name: "Singapore Airlines"}),
+      (review)-[:FLOWN_ON_ROUTE]->(route:Route)
+RETURN route.name, count(review) AS reviews
+ORDER BY reviews DESC
+LIMIT 10;
+```
+
+The same graph analytics are available from FastAPI:
+
+```bash
+curl -s "http://127.0.0.1:8000/graph/airlines/Singapore%20Airlines"
+```
+
 ## Project structure
 
 ```text
@@ -448,12 +508,15 @@ airline-project/
 │   ├── crawl_sources.py   Quality-filtered Firecrawl collection
 │   ├── db.py              Postgres connection and review inserts
 │   ├── embedder.py        Sentence-transformer embeddings
+│   ├── graph.py           Neo4j persistence and graph analytics
 │   ├── ingest.py          Spreadsheet dataset ingestion
 │   ├── ingest_web.py      Crawled web-document ingestion
 │   ├── llm.py             Gemini client and answer generation
 │   ├── logging_config.py  Rotating logs and safe call tracing
 │   ├── rag.py             Prompt construction and RAG orchestration
 │   ├── retriever.py       Combined Qdrant search
+│   ├── review_identity.py Stable review hashes and vector IDs
+│   ├── summarizer.py      Deterministic extractive review summaries
 │   └── search_test.py     Command-line retrieval smoke test
 ├── config/
 │   └── airline_sources.yaml
@@ -462,7 +525,7 @@ airline-project/
 ├── landing/               Local datasets and crawl output
 ├── tests/                 Offline automated tests
 ├── .env.example           Safe environment-variable template
-├── docker-compose.yml     Postgres, Qdrant, and ingestion services
+├── docker-compose.yml     Postgres, Qdrant, Neo4j, and ingestion services
 ├── Dockerfile
 ├── requirements.txt
 └── streamlit_app.py       Streamlit entry point
@@ -484,14 +547,19 @@ airline-project/
 | `QDRANT_PORT` | Qdrant HTTP port | `6333` |
 | `QDRANT_COLLECTION` | Dataset vector collection | `airline_reviews` |
 | `QDRANT_WEB_COLLECTION` | Web vector collection | `airline_web_documents` |
+| `NEO4J_ENABLED` | Enable graph storage and analytics | `true` |
+| `NEO4J_URI` | Neo4j Bolt connection URI | `bolt://localhost:7687` |
+| `NEO4J_USER` | Neo4j database user | `neo4j` |
+| `NEO4J_PASSWORD` | Neo4j database password | `airline_graph_pass` |
+| `NEO4J_DATABASE` | Neo4j logical database | `neo4j` |
 | `LANDING_PATH` | Spreadsheet input directory | `./landing` |
 | `LOG_LEVEL` | Log detail (`INFO` or `DEBUG`) | `INFO` |
 | `LOG_FILE` | Rotating application log path | `logs/airline_app.log` |
 | `LOG_MAX_BYTES` | Maximum size of each log file | `5242880` |
 | `LOG_BACKUP_COUNT` | Number of rotated files to retain | `5` |
 
-The `.env.docker` file uses Docker service names such as `postgres` and
-`qdrant` instead of `localhost`.
+The `.env.docker` file uses Docker service names such as `postgres`, `qdrant`,
+and `neo4j` instead of `localhost`.
 
 ## Application logs and call tracking
 
@@ -506,7 +574,7 @@ The logs show:
 
 - incoming FastAPI requests, response status codes, and durations;
 - application function calls and the filename and line that called them;
-- Gemini, Firecrawl, Qdrant, and Postgres operations;
+- Gemini, Firecrawl, Qdrant, Postgres, and Neo4j operations;
 - dataset, YAML, and JSONL file reads and writes;
 - crawler and ingestion totals, failures, and timings;
 - a `request_id` that connects all messages from one API request, Streamlit
@@ -562,7 +630,7 @@ Both should point inside `.venv`.
 Start the services and inspect their status:
 
 ```bash
-docker compose up -d postgres qdrant
+docker compose up -d postgres qdrant neo4j
 docker compose ps
 docker compose logs --tail=50 postgres
 docker compose logs --tail=50 qdrant
@@ -618,7 +686,7 @@ used. Later runs reuse the local cache.
 Start infrastructure:
 
 ```bash
-docker compose up -d postgres qdrant
+docker compose up -d postgres qdrant neo4j
 ```
 
 View status:
@@ -630,7 +698,7 @@ docker compose ps
 Restart infrastructure:
 
 ```bash
-docker compose restart postgres qdrant
+docker compose restart postgres qdrant neo4j
 ```
 
 Stop containers but keep stored data:
@@ -639,7 +707,7 @@ Stop containers but keep stored data:
 docker compose down
 ```
 
-Delete containers and all Docker-managed Postgres and Qdrant data:
+Delete containers and all Docker-managed Postgres, Qdrant, and Neo4j data:
 
 ```bash
 docker compose down -v
@@ -652,6 +720,10 @@ docker compose down -v
 
 - Spreadsheet ingestion rebuilds the dataset vector collection, so an
   interrupted run should be rerun before using dataset search.
+- Postgres, Qdrant, and Neo4j do not share one transaction. If ingestion is
+  interrupted, rerun it to rebuild a consistent Qdrant and Neo4j snapshot.
+- Neo4j improves connected-data queries but does not replace Qdrant's semantic
+  vector ranking; the two stores serve different query patterns.
 - Web collection quality depends on third-party page availability and markup.
 - Some sources may temporarily return bot-verification or access-denied pages.
 - The crawler collects a bounded recent sample, not every historical review.
@@ -666,7 +738,7 @@ For a short demonstration after data has already been ingested:
 ```bash
 cd /Users/minhbui/Documents/GitHub/airline-project
 source .venv/bin/activate
-docker compose up -d postgres qdrant
+docker compose up -d postgres qdrant neo4j
 docker compose ps
 python -m app.search_test
 python -m streamlit run streamlit_app.py

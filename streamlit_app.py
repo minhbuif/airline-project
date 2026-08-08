@@ -84,6 +84,11 @@ URL: {source.get("source_url", "Not available")}
 Score: {source.get("score", 0):.3f}
 """
                     )
+                    if source.get("review_summary"):
+                        st.caption(
+                            "Summary: "
+                            f"{source['review_summary']}"
+                        )
                     st.divider()
 
 
@@ -141,6 +146,12 @@ if prompt := st.chat_input(
 **Similarity:** {source.get("score", 0):.3f}
 """
                         )
+
+                        if source.get("review_summary"):
+                            st.caption(
+                                "Summary: "
+                                f"{source['review_summary']}"
+                            )
 
                         excerpt = (
                             source.get("text", "")[:500]

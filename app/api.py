@@ -6,6 +6,7 @@ import time
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.graph import get_airline_graph_overview, graph_enabled
 from app.logging_config import (
     get_logger,
     new_request_id,
@@ -87,7 +88,34 @@ class AskRequest(BaseModel):
 @app.get("/health")
 def health() -> dict:
     """Return a lightweight process health response."""
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "neo4j_enabled": graph_enabled(),
+    }
+
+
+@app.get("/graph/airlines/{airline_name}")
+def graph_airline_overview(airline_name: str) -> dict:
+    """Return Neo4j relationship statistics for one airline."""
+    if not graph_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Neo4j graph integration is disabled.",
+        )
+    try:
+        result = get_airline_graph_overview(airline_name)
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No graph data found for {airline_name!r}.",
+            )
+        return result
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/search")

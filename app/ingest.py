@@ -1,4 +1,4 @@
-"""Ingest a passenger-review CSV/XLSX dataset into Postgres and Qdrant."""
+"""Ingest passenger reviews into Postgres, Qdrant, and optional Neo4j."""
 
 import glob
 import os
@@ -15,6 +15,16 @@ from app.db import (
     test_postgres_connection,
 )
 from app.embedder import VECTOR_SIZE, embed_text, get_model
+from app.graph import (
+    GraphUpsertError,
+    build_graph_record,
+    close_graph_driver,
+    ensure_graph_schema,
+    graph_enabled,
+    reset_dataset_graph,
+    test_graph_connection,
+    upsert_graph_reviews,
+)
 from app.logging_config import (
     get_logger,
     new_request_id,
@@ -26,6 +36,7 @@ from app.review_identity import (
     build_review_hash,
     deterministic_review_point_id,
 )
+from app.summarizer import build_review_embedding_text, summarize_review
 
 
 logger = get_logger(__name__)
@@ -181,26 +192,6 @@ def normalize_row(row, source_row_id: int) -> dict:
     }
 
 
-def build_document_text(item: dict) -> str:
-    """Build the text embedded and stored in the Qdrant payload."""
-    return f"""
-Airline: {item["airline_name"]}
-Title: {item["title"]}
-Country: {item["country"]}
-Review Date: {item["review_date"]}
-Verified: {item["verified"]}
-Traveller Type: {item["traveller_type"]}
-Seat Type: {item["seat_type"]}
-Route: {item["route"]}
-Date Flown: {item["date_flown"]}
-Aircraft: {item["aircraft"]}
-Recommended: {item["recommended"]}
-
-Review:
-{item["review_text"]}
-""".strip()
-
-
 @track_call
 def setup_qdrant_collection(client: QdrantClient) -> None:
     """Rebuild the dataset collection to remove stale or legacy vectors."""
@@ -294,6 +285,8 @@ def main() -> None:
             f"{duplicates_removed}"
         )
     get_model()
+    test_graph_connection()
+    ensure_graph_schema()
 
     qdrant = QdrantClient(
         host=settings.QDRANT_HOST,
@@ -301,10 +294,13 @@ def main() -> None:
     )
 
     setup_qdrant_collection(qdrant)
+    reset_dataset_graph()
 
     # Batch vector writes to reduce Qdrant network overhead.
     points: list[PointStruct] = []
+    graph_records: list[dict] = []
     upserted_count = 0
+    graph_upserted_count = 0
     skipped_count = 0
     duplicate_count = 0
     failed_count = 0
@@ -323,15 +319,17 @@ def main() -> None:
                 duplicate_count += 1
                 continue
 
+            item["review_summary"] = summarize_review(item["review_text"])
             postgres_id = insert_review(item)
 
-            document_text = build_document_text(item)
+            document_text = build_review_embedding_text(item)
             vector = embed_text(document_text)
 
             payload = {
                 "postgres_id": postgres_id,
                 "source_row_id": item["source_row_id"],
                 "review_hash": item["review_hash"],
+                "review_summary": item["review_summary"],
                 "airline_name": item["airline_name"],
                 "title": item["title"],
                 "country": item["country"],
@@ -344,7 +342,9 @@ def main() -> None:
                 "recommended": item["recommended"],
                 "aircraft": item["aircraft"],
                 "overall_rating": item["overall_rating"],
-                "text": document_text,
+                # Store clean evidence separately from the summary-first text
+                # used only to produce the embedding vector.
+                "text": item["review_text"],
             }
 
             points.append(
@@ -356,6 +356,10 @@ def main() -> None:
                     payload=payload,
                 )
             )
+            if graph_enabled():
+                graph_records.append(
+                    build_graph_record(item, postgres_id)
+                )
             seen_review_hashes.add(item["review_hash"])
 
             upserted_count += 1
@@ -363,10 +367,12 @@ def main() -> None:
             if len(points) >= 100:
                 upsert_points(qdrant, points)
                 points.clear()
+                graph_upserted_count += upsert_graph_reviews(graph_records)
+                graph_records.clear()
 
-        except QdrantUpsertError:
+        except (QdrantUpsertError, GraphUpsertError):
             # Stop rather than continuing to insert Postgres rows while the
-            # vector store is unavailable.
+            # vector or graph store is unavailable.
             raise
         except Exception as exc:
             failed_count += 1
@@ -380,20 +386,28 @@ def main() -> None:
     if points:
         upsert_points(qdrant, points)
         points.clear()
+    if graph_records:
+        graph_upserted_count += upsert_graph_reviews(graph_records)
+        graph_records.clear()
 
     print("Ingestion completed.")
     print(f"Upserted rows: {upserted_count}")
     print(f"Skipped rows: {skipped_count}")
     print(f"Duplicate input rows: {duplicate_count}")
     print(f"Failed rows: {failed_count}")
+    if graph_enabled():
+        print(f"Neo4j reviews upserted: {graph_upserted_count}")
     logger.info(
         "event=dataset_ingestion_completed upserted_count=%s "
-        "skipped_count=%s duplicate_count=%s failed_count=%s",
+        "skipped_count=%s duplicate_count=%s failed_count=%s "
+        "graph_upserted_count=%s",
         upserted_count,
         skipped_count,
         duplicate_count,
         failed_count,
+        graph_upserted_count,
     )
+    close_graph_driver()
 
 
 if __name__ == "__main__":

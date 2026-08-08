@@ -21,6 +21,18 @@ def _get_int(name: str, default: int) -> int:
         ) from exc
 
 
+def _get_bool(name: str, default: bool = False) -> bool:
+    """Read a boolean environment setting with strict validation."""
+    raw_value = os.getenv(name, str(default)).strip().casefold()
+    if raw_value in {"1", "true", "yes", "on"}:
+        return True
+    if raw_value in {"0", "false", "no", "off"}:
+        return False
+    raise RuntimeError(
+        f"{name} must be true or false; received {raw_value!r}."
+    )
+
+
 class Settings:
     """Centralized environment-backed application configuration."""
 
@@ -50,6 +62,12 @@ class Settings:
     )
 
     FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
+
+    NEO4J_ENABLED = _get_bool("NEO4J_ENABLED", False)
+    NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+    NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+    NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
+    NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
 
     @property
     def postgres_url(self) -> str:

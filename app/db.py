@@ -59,7 +59,7 @@ def test_postgres_connection() -> None:
 
 @track_call
 def ensure_review_identity_schema() -> int:
-    """Add stable review identities and remove legacy Postgres duplicates.
+    """Add review hashes/summaries and remove legacy Postgres duplicates.
 
     Returns the number of duplicate rows removed during a one-time migration.
     Fresh databases already have the unique review_hash constraint and return
@@ -71,6 +71,10 @@ def ensure_review_identity_schema() -> int:
                 conn.execute(text(
                     "ALTER TABLE airline_reviews "
                     "ADD COLUMN IF NOT EXISTS review_hash CHAR(64);"
+                ))
+                conn.execute(text(
+                    "ALTER TABLE airline_reviews "
+                    "ADD COLUMN IF NOT EXISTS review_summary TEXT;"
                 ))
                 existing_index = conn.execute(text(
                     "SELECT to_regclass("
@@ -146,6 +150,7 @@ def insert_review(row: dict) -> int:
         INSERT INTO airline_reviews (
             source_row_id,
             review_hash,
+            review_summary,
             airline_name,
             title,
             review_text,
@@ -163,6 +168,7 @@ def insert_review(row: dict) -> int:
         VALUES (
             :source_row_id,
             :review_hash,
+            :review_summary,
             :airline_name,
             :title,
             :review_text,
@@ -180,6 +186,7 @@ def insert_review(row: dict) -> int:
         ON CONFLICT (review_hash)
         DO UPDATE SET
             source_row_id = EXCLUDED.source_row_id,
+            review_summary = EXCLUDED.review_summary,
             airline_name = EXCLUDED.airline_name,
             title = EXCLUDED.title,
             review_text = EXCLUDED.review_text,
@@ -199,6 +206,7 @@ def insert_review(row: dict) -> int:
     row_with_hash = {
         **row,
         "review_hash": row.get("review_hash") or build_review_hash(row),
+        "review_summary": row.get("review_summary") or "",
     }
 
     try:

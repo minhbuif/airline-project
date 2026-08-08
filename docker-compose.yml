@@ -23,12 +23,25 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: airline_neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/airline_graph_pass
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+
   ingest:
     build: .
     container_name: airline_ingest
     depends_on:
       - postgres
       - qdrant
+      - neo4j
     env_file:
       - .env.docker
     volumes:
@@ -39,3 +52,4 @@ services:
 volumes:
   postgres_data:
   qdrant_data:
+  neo4j_data:

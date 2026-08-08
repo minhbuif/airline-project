@@ -20,6 +20,7 @@ def format_context(reviews: list[dict]) -> str:
             )
 
         review_text = str(review.get("text") or "")
+        review_summary = str(review.get("review_summary") or "")
 
         # Prevent one long review from consuming the whole prompt.
         review_text = review_text[:MAX_REVIEW_CHARACTERS]
@@ -41,6 +42,7 @@ Seat Type: {review.get("seat_type") or "Unknown"}
 Route: {review.get("route") or "Unknown"}
 Aircraft: {review.get("aircraft") or "Unknown"}
 Recommended: {review.get("recommended") or "Unknown"}
+Review Summary: {review_summary or "Not available"}
 
 Source Content:
 {review_text}

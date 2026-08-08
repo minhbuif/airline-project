@@ -65,6 +65,7 @@ def _normalize_point(point: Any, collection_name: str) -> dict[str, Any]:
         "date_flown": payload.get("date_flown"),
         "aircraft": payload.get("aircraft"),
         "recommended": payload.get("recommended"),
+        "review_summary": payload.get("review_summary"),
         "text": payload.get("text"),
         "postgres_id": payload.get("postgres_id"),
         "chunk_index": payload.get("chunk_index"),

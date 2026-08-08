@@ -11,3 +11,4 @@ uvicorn
 google-genai
 firecrawl-py>=4.32,<5
 PyYAML
+neo4j>=5.26,<7
