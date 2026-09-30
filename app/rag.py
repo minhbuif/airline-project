@@ -3,6 +3,7 @@
 from app.llm import generate_answer
 from app.logging_config import get_logger, track_call
 from app.retriever import retrieve_reviews
+from app.prompts import SYSTEM_PROMPT
 
 
 MAX_REVIEW_CHARACTERS = 3000
@@ -56,26 +57,7 @@ Source Content:
 def build_prompt(question: str, context: str) -> str:
     """Build a grounded prompt containing the question and source context."""
     return f"""
-You are an Airline Review Intelligence Assistant.
-
-Your task is to answer questions using only the passenger-review dataset
-and crawled web sources supplied below.
-
-Rules:
-1. Use only information contained in the supplied sources.
-2. Do not use outside knowledge.
-3. Cite claims with [SOURCE 1], [SOURCE 2], and so on.
-4. Clearly distinguish individual opinions from repeated patterns.
-5. Treat passenger reviews and flight reports as subjective experiences,
-   not objective facts.
-6. Do not make claims about aviation safety, live ticket prices,
-   current schedules, or airline performance outside this dataset.
-7. If the sources do not contain enough evidence, say:
-   "The retrieved reviews do not provide enough information to
-   answer this question."
-8. Keep the answer clear and concise.
-9. When comparing airlines, make sure the retrieved sources actually
-   include each airline being compared.
+{SYSTEM_PROMPT}
 
 USER QUESTION:
 {question}

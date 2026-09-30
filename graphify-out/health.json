@@ -1,0 +1,198 @@
+{
+  "node_count": 401,
+  "unverified_node_count": 0,
+  "raw_edge_count": 891,
+  "non_object_edges": 0,
+  "missing_endpoint_edges": 0,
+  "dangling_endpoint_edges": 89,
+  "external_reference_edges": 0,
+  "self_loop_edges": 0,
+  "valid_candidate_edges": 802,
+  "exact_duplicate_edges": 0,
+  "directed_unique_endpoint_pairs": 786,
+  "directed_same_endpoint_collapsed_edges": 16,
+  "undirected_unique_endpoint_pairs": 786,
+  "undirected_same_endpoint_collapsed_edges": 16,
+  "same_endpoint_group_count": 16,
+  "relation_variant_groups": 4,
+  "source_file_variant_groups": 0,
+  "source_location_variant_groups": 3,
+  "context_variant_groups": 9,
+  "post_build_graph_type": "Graph",
+  "post_build_node_count": 440,
+  "post_build_edge_count": 875,
+  "post_build_error": "",
+  "producer_suppression": {
+    "path": "/Users/minhbui/.local/share/uv/tools/graphifyy/lib/python3.12/site-packages/graphify/extract.py",
+    "total_sites": 12,
+    "sites": [
+      {
+        "line": 1651,
+        "name": "seen_ids",
+        "tuple_arity": 0,
+        "sample": "seen_ids = {n[\"id\"] for n in nodes}"
+      },
+      {
+        "line": 2184,
+        "name": "seen_ids",
+        "tuple_arity": 0,
+        "sample": "seen_ids = {n[\"id\"] for n in nodes}"
+      },
+      {
+        "line": 2186,
+        "name": "seen_doc_refs",
+        "tuple_arity": 0,
+        "sample": "seen_doc_refs: set[str] = set()"
+      },
+      {
+        "line": 2556,
+        "name": "seen_ids",
+        "tuple_arity": 0,
+        "sample": "seen_ids: set[str] = {n[\"id\"] for n in nodes}"
+      },
+      {
+        "line": 2703,
+        "name": "seen_ids",
+        "tuple_arity": 0,
+        "sample": "seen_ids = {n.get(\"id\") for n in nodes}"
+      },
+      {
+        "line": 3429,
+        "name": "seen_keys",
+        "tuple_arity": 0,
+        "sample": "seen_keys: set[tuple] = set()"
+      },
+      {
+        "line": 3598,
+        "name": "seen_keys",
+        "tuple_arity": 0,
+        "sample": "seen_keys: set[tuple] = set()"
+      },
+      {
+        "line": 5675,
+        "name": "seen_ids",
+        "tuple_arity": 0,
+        "sample": "seen_ids: set[str] = set()"
+      },
+      {
+        "line": 5783,
+        "name": "seen_ids",
+        "tuple_arity": 0,
+        "sample": "seen_ids: set[str] = set()"
+      },
+      {
+        "line": 5862,
+        "name": "seen_ids",
+        "tuple_arity": 0,
+        "sample": "seen_ids: set[str] = set()"
+      },
+      {
+        "line": 6377,
+        "name": "seen_ids",
+        "tuple_arity": 0,
+        "sample": "seen_ids: set[str] = set()"
+      },
+      {
+        "line": 6378,
+        "name": "seen_edges",
+        "tuple_arity": 4,
+        "sample": "seen_edges: set[tuple[str, str, str, str | None]] = set()"
+      }
+    ],
+    "error": ""
+  },
+  "examples": [
+    {
+      "source": "app_crawl_sources_get_metadata_value",
+      "target": "app_crawl_sources_py_any",
+      "edge_count": 2,
+      "relations": [
+        "references"
+      ],
+      "source_files": [
+        "app/crawl_sources.py"
+      ],
+      "source_locations": [
+        "L147"
+      ],
+      "contexts": [
+        "parameter_type",
+        "return_type"
+      ]
+    },
+    {
+      "source": "app_crawl_sources_scrape_document",
+      "target": "app_crawl_sources_py_any",
+      "edge_count": 2,
+      "relations": [
+        "references"
+      ],
+      "source_files": [
+        "app/crawl_sources.py"
+      ],
+      "source_locations": [
+        "L284"
+      ],
+      "contexts": [
+        "parameter_type",
+        "return_type"
+      ]
+    },
+    {
+      "source": "app_crawl_sources_build_record",
+      "target": "app_crawl_sources_py_any",
+      "edge_count": 2,
+      "relations": [
+        "references"
+      ],
+      "source_files": [
+        "app/crawl_sources.py"
+      ],
+      "source_locations": [
+        "L307"
+      ],
+      "contexts": [
+        "generic_arg",
+        "parameter_type"
+      ]
+    },
+    {
+      "source": "app_crawl_sources_discover_target_urls",
+      "target": "app_crawl_sources_py_any",
+      "edge_count": 2,
+      "relations": [
+        "references"
+      ],
+      "source_files": [
+        "app/crawl_sources.py"
+      ],
+      "source_locations": [
+        "L361"
+      ],
+      "contexts": [
+        "generic_arg",
+        "parameter_type"
+      ]
+    },
+    {
+      "source": "app_graph_build_graph_record",
+      "target": "app_graph_build_graph_record_clean",
+      "edge_count": 2,
+      "relations": [
+        "calls",
+        "contains"
+      ],
+      "source_files": [
+        "app/graph.py"
+      ],
+      "source_locations": [
+        "L240",
+        "L246"
+      ],
+      "contexts": [
+        "",
+        "call"
+      ]
+    }
+  ]
+}

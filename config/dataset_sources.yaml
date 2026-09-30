@@ -1,0 +1,15 @@
+# Provenance registry. Missing travel dates must never be inferred from publication dates.
+datasets:
+  Airline_Reviews_Combined.xlsx:
+    source_name: Original airline review dataset
+    license: Unspecified - supplied by project owner
+    attribution: Original project dataset; provenance requires owner confirmation
+  mendeley_skytrax_2026.xlsx:
+    source_name: Mendeley Airline Travel Reviews Data (Skytrax), v1
+    source_url: https://data.mendeley.com/datasets/vgjk58vf8h/1
+    license: CC BY 4.0 (publisher-listed)
+    attribution: Borse, Rushikesh; Mishra, Anirudh (2026), Airline Travel Reviews Data (Skytrax), Mendeley Data, V1, doi:10.17632/vgjk58vf8h.1
+    sha256: 30eab5be4c53b3cad8defa9ff49228caec0c1ec093aba0cc45a978aece2ca9d9
+    download_url: https://data.mendeley.com/public-files/datasets/vgjk58vf8h/files/ddfdec3a-4cb6-436a-ad1f-8ea70a85e4da/file_downloaded
+    license_url: https://creativecommons.org/licenses/by/4.0/
+    limitations: Historical reviews; contributors removed journey dates. Publisher license does not independently verify third-party rights. Whitespace/column normalization and extractive summaries are applied on ingestion.

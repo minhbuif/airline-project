@@ -1,0 +1,23 @@
+{
+  "0": "Web Crawl Quality",
+  "1": "Documented Application Architecture",
+  "2": "Web Document Ingestion",
+  "3": "Admin Configuration Monitoring",
+  "4": "Retrieval and Evidence Formatting",
+  "5": "API and Answer Generation",
+  "6": "Neo4j Storage and Analytics",
+  "7": "Spreadsheet Review Ingestion",
+  "8": "Extractive Review Summaries",
+  "9": "Stable Review Identities",
+  "10": "User Requests and Correlation",
+  "11": "Graph Records and Tests",
+  "12": "Database Preflight and Tracing",
+  "13": "Embeddings and Call Instrumentation",
+  "14": "Logging Infrastructure",
+  "15": "Logging Privacy Tests",
+  "16": "Dataset Vector Writes",
+  "17": "Logging Setup",
+  "18": "Log Metadata Redaction",
+  "19": "Application Package",
+  "20": "Test Package"
+}

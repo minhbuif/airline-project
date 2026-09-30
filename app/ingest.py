@@ -2,6 +2,8 @@
 
 import glob
 import os
+import argparse
+from sqlalchemy import text
 
 import pandas as pd
 from qdrant_client import QdrantClient
@@ -37,6 +39,9 @@ from app.review_identity import (
     deterministic_review_point_id,
 )
 from app.summarizer import build_review_embedding_text, summarize_review
+from app.dataset_io import discover_files, load_inputs, normalize
+from app.dataset_store import ensure_dataset_schema, import_lock, persist_review, record_run
+from app.db import engine
 
 
 logger = get_logger(__name__)
@@ -193,8 +198,8 @@ def normalize_row(row, source_row_id: int) -> dict:
 
 
 @track_call
-def setup_qdrant_collection(client: QdrantClient) -> None:
-    """Rebuild the dataset collection to remove stale or legacy vectors."""
+def setup_qdrant_collection(client: QdrantClient, replace: bool = False) -> None:
+    """Preserve existing vectors unless replacement was explicitly requested."""
     try:
         with tracked_operation(
             logger,
@@ -205,6 +210,12 @@ def setup_qdrant_collection(client: QdrantClient) -> None:
             existing_names = [collection.name for collection in collections]
 
             if settings.QDRANT_COLLECTION in existing_names:
+                if not replace:
+                    info = client.get_collection(settings.QDRANT_COLLECTION)
+                    vectors = info.config.params.vectors
+                    if getattr(vectors, 'size', None) != VECTOR_SIZE:
+                        raise ValueError('Existing collection has an incompatible embedding dimension.')
+                    return
                 print(
                     "Rebuilding Qdrant collection: "
                     f"{settings.QDRANT_COLLECTION}"
@@ -254,27 +265,11 @@ def upsert_points(
 
 
 @track_call
-def main() -> None:
-    """Run the end-to-end passenger-review ingestion pipeline."""
-    set_request_id(new_request_id("ingest"))
+def import_rows(df, replace=False) -> dict:
+    """Write prevalidated inputs; reruns repair partial writes with stable IDs."""
     print("Starting airline review ingestion...")
     logger.info("event=dataset_ingestion_started")
-
-    file_path = find_dataset_file()
-    print(f"Dataset file found: {file_path}")
-
-    df = load_dataset(file_path)
-    logger.info(
-        "event=dataset_loaded path=%s row_count=%s column_count=%s",
-        file_path,
-        len(df),
-        len(df.columns),
-    )
     print(f"Loaded rows: {len(df)}")
-    print("Columns:", list(df.columns))
-
-    df = df.drop_duplicates()
-    print(f"Rows after exact duplicate removal: {len(df)}")
 
     # Complete dependency and input checks before rebuilding vector storage.
     test_postgres_connection()
@@ -293,8 +288,11 @@ def main() -> None:
         port=settings.QDRANT_PORT,
     )
 
-    setup_qdrant_collection(qdrant)
-    reset_dataset_graph()
+    setup_qdrant_collection(qdrant, replace=replace)
+    if replace:
+        reset_dataset_graph()
+        with engine.begin() as conn:
+            conn.execute(text('DELETE FROM airline_reviews'))
 
     # Batch vector writes to reduce Qdrant network overhead.
     points: list[PointStruct] = []
@@ -308,24 +306,27 @@ def main() -> None:
 
     for idx, row in tqdm(df.iterrows(), total=len(df)):
         try:
-            item = normalize_row(row, source_row_id=idx)
+            item = normalize(row, row['_source_row'])
 
-            if not item["review_text"]:
+            if not item["review_text"] or not item['airline_name']:
                 skipped_count += 1
                 continue
 
-            item["review_hash"] = build_review_hash(item)
-            if item["review_hash"] in seen_review_hashes:
-                duplicate_count += 1
-                continue
-
             item["review_summary"] = summarize_review(item["review_text"])
-            postgres_id = insert_review(item)
+            provenance = {field: str(row['_' + field]) for field in (
+                'source_file', 'file_sha256', 'source_name', 'source_url', 'license', 'attribution')}
+            provenance['source_row_id'] = str(row['_source_row'])
+            postgres_id, item, matched = persist_review(item, provenance)
+            if matched:
+                duplicate_count += 1
 
             document_text = build_review_embedding_text(item)
             vector = embed_text(document_text)
 
             payload = {
+                'source_name': item['source_name'],
+                'source_url': item['source_url'],
+                'sources': item['sources'],
                 "postgres_id": postgres_id,
                 "source_row_id": item["source_row_id"],
                 "review_hash": item["review_hash"],
@@ -407,7 +408,59 @@ def main() -> None:
         failed_count,
         graph_upserted_count,
     )
-    close_graph_driver()
+    return {'processed': upserted_count, 'skipped': skipped_count,
+            'matched_existing': duplicate_count, 'failed': failed_count,
+            'graph_upserted': graph_upserted_count}
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description='Import all CSV/XLSX datasets additively by default.')
+    parser.add_argument('--file', action='append', default=[], help='Import a specific file; repeat for multiple files.')
+    parser.add_argument('--limit', type=int, help='Pilot: maximum rows per file.')
+    parser.add_argument('--dry-run', action='store_true', help='Validate files only; no database/API calls.')
+    parser.add_argument('--replace', action='store_true', help='Delete and rebuild ALL dataset reviews, graph and vectors from these inputs.')
+    parser.add_argument('--confirm-replace', action='store_true', help='Acknowledge removal of previously imported dataset reviews.')
+    args = parser.parse_args(argv)
+    if args.limit is not None and args.limit < 1:
+        parser.error('--limit must be positive')
+    if args.replace and not args.confirm_replace:
+        parser.error('--replace requires --confirm-replace; default ingestion is additive')
+    if args.replace and args.limit:
+        parser.error('A limited pilot cannot replace the full dataset')
+    return args
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    paths = discover_files(settings.LANDING_PATH, args.file)
+    df = load_inputs(paths, limit=args.limit)
+    valid = sum(bool((item := normalize(row, row['_source_row']))['airline_name'] and item['review_text'])
+                for _, row in df.iterrows())
+    if not valid:
+        raise ValueError('No valid airline reviews in selected files; existing stores unchanged.')
+    print(f'Validated {len(paths)} files: {len(df)} rows, {valid} valid reviews.')
+    if args.dry_run:
+        return
+    test_postgres_connection()
+    with import_lock():
+        ensure_review_identity_schema()
+        ensure_dataset_schema()
+        run_id = new_request_id('ingest')
+        set_request_id(run_id)
+        files = [p.name for p in paths]
+        mode = 'replace' if args.replace else 'add'
+        record_run(run_id, mode, files)
+        try:
+            metrics = import_rows(df, replace=args.replace)
+            record_run(run_id, mode, files, metrics,
+                       status='Completed with errors' if metrics['failed'] else 'Completed')
+            if metrics['failed']:
+                raise RuntimeError(f"{metrics['failed']} rows failed; inspect logs and rerun.")
+        except Exception as exc:
+            record_run(run_id, mode, files, locals().get('metrics', {}), status='Failed', error_type=type(exc).__name__)
+            raise
+        finally:
+            close_graph_driver()
 
 
 if __name__ == "__main__":

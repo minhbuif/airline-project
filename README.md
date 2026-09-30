@@ -82,6 +82,34 @@ python -m streamlit run streamlit_app.py
 Open `http://localhost:8501`. You do not need to crawl or ingest again every
 time the application starts.
 
+## Admin monitoring
+
+The **Admin** page in Streamlit's sidebar shows recent logs, recorded tasks and
+function calls, the active Gemini model, service configuration, and the exact
+shared instructions used to build answers.
+
+1. Add `ADMIN_PASSWORD=your-own-password` to your local `.env` file.
+2. Restart Streamlit with `python -m streamlit run streamlit_app.py`.
+3. Open **Admin** in the sidebar and sign in with that password.
+
+The page refreshes every five seconds while open; you can disable this or
+refresh manually. Filter logs by severity or search for an event, module,
+caller, or request ID, then download the filtered view. Credentials are masked.
+The page is disabled until an admin password is configured.
+
+Monitoring is read-only. Change `GEMINI_MODEL` in `.env` and assistant
+instructions in `app/prompts.py`, then restart the relevant processes.
+Configuration reflects the Streamlit process; other processes may use different
+environments. Instructions are prepended to the RAG input, not passed as a
+separate Gemini system-message parameter.
+
+Task activity is inferred from recorded start/completion/failure events, not a
+job scheduler or process health check. An unmatched start does not prove a job
+is still running. Only the configured current log is read (up to 1 MiB and
+5,000 recent lines); rotated history is excluded. Log severity also depends on
+`LOG_LEVEL`. Use HTTPS and deployment-level access control when exposing the
+application outside local development.
+
 ## Requirements
 
 Install these before starting:
