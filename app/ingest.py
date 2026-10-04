@@ -302,7 +302,6 @@ def import_rows(df, replace=False) -> dict:
     skipped_count = 0
     duplicate_count = 0
     failed_count = 0
-    seen_review_hashes: set[str] = set()
 
     for idx, row in tqdm(df.iterrows(), total=len(df)):
         try:
@@ -361,7 +360,6 @@ def import_rows(df, replace=False) -> dict:
                 graph_records.append(
                     build_graph_record(item, postgres_id)
                 )
-            seen_review_hashes.add(item["review_hash"])
 
             upserted_count += 1
 
@@ -394,7 +392,7 @@ def import_rows(df, replace=False) -> dict:
     print("Ingestion completed.")
     print(f"Upserted rows: {upserted_count}")
     print(f"Skipped rows: {skipped_count}")
-    print(f"Duplicate input rows: {duplicate_count}")
+    print(f"Matched existing reviews: {duplicate_count}")
     print(f"Failed rows: {failed_count}")
     if graph_enabled():
         print(f"Neo4j reviews upserted: {graph_upserted_count}")
@@ -417,15 +415,20 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description='Import all CSV/XLSX datasets additively by default.')
     parser.add_argument('--file', action='append', default=[], help='Import a specific file; repeat for multiple files.')
     parser.add_argument('--limit', type=int, help='Pilot: maximum rows per file.')
+    parser.add_argument('--sample-per-airline', type=int, help='Pilot: first N reviews per airline in each file; preserves source row IDs.')
     parser.add_argument('--dry-run', action='store_true', help='Validate files only; no database/API calls.')
     parser.add_argument('--replace', action='store_true', help='Delete and rebuild ALL dataset reviews, graph and vectors from these inputs.')
     parser.add_argument('--confirm-replace', action='store_true', help='Acknowledge removal of previously imported dataset reviews.')
     args = parser.parse_args(argv)
     if args.limit is not None and args.limit < 1:
         parser.error('--limit must be positive')
+    if args.sample_per_airline is not None and args.sample_per_airline < 1:
+        parser.error('--sample-per-airline must be positive')
+    if args.sample_per_airline and args.limit:
+        parser.error('Choose either --sample-per-airline or --limit')
     if args.replace and not args.confirm_replace:
         parser.error('--replace requires --confirm-replace; default ingestion is additive')
-    if args.replace and args.limit:
+    if args.replace and (args.limit or args.sample_per_airline):
         parser.error('A limited pilot cannot replace the full dataset')
     return args
 
@@ -433,7 +436,7 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
     paths = discover_files(settings.LANDING_PATH, args.file)
-    df = load_inputs(paths, limit=args.limit)
+    df = load_inputs(paths, limit=args.limit, sample_per_airline=args.sample_per_airline)
     valid = sum(bool((item := normalize(row, row['_source_row']))['airline_name'] and item['review_text'])
                 for _, row in df.iterrows())
     if not valid:

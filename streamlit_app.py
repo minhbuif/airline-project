@@ -25,6 +25,13 @@ st.caption(
 # Sidebar values are used to constrain retrieval for each new question.
 with st.sidebar:
     st.header("Search settings")
+    retrieval_mode = st.selectbox('Retrieval mode', ['vector', 'graph'],
+                                  help='Graph: Neo4j selects eligible dataset reviews, then Qdrant ranks them. No silent fallback.')
+    dataset_only = st.checkbox('Dataset reviews only (fair comparison)', value=False)
+    route_filter = st.text_input('Exact route filter (optional)', help='Use the stored spelling, e.g. London to Doha. Restricts search to dataset reviews.')
+    cabin_filter = st.selectbox('Cabin filter', ['', 'Economy Class', 'Premium Economy', 'Business Class', 'First Class'])
+    if retrieval_mode == 'graph':
+        st.caption('Experimental: dataset only. Specify a recognized airline, exact route, or cabin. Unknown route/cabin spellings can return no evidence.')
 
     selected_airline = st.selectbox(
         "Airline",
@@ -89,6 +96,8 @@ Score: {source.get("score", 0):.3f}
                             "Summary: "
                             f"{source['review_summary']}"
                         )
+                    for dataset in source.get('dataset_sources', []):
+                        st.caption(f"{dataset['attribution']} · {dataset['license']}")
                     st.divider()
 
 
@@ -124,6 +133,8 @@ if prompt := st.chat_input(
                 result = answer_question(
                     question=effective_question,
                     limit=top_k,
+                    retrieval_mode=retrieval_mode, route=route_filter,
+                    seat_type=cabin_filter, dataset_only=dataset_only,
                 )
 
                 st.markdown(result["answer"])
@@ -158,6 +169,8 @@ if prompt := st.chat_input(
                         )
 
                         st.caption(excerpt)
+                        for dataset in source.get('dataset_sources', []):
+                            st.caption(f"{dataset['attribution']} · {dataset['license']}")
                         st.divider()
 
                 st.session_state.messages.append({

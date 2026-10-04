@@ -406,6 +406,13 @@ returns a trimmed answer. SDK and network failures become application-level
 
 File: `app/ingest.py`
 
+**Current ingestion path:** `main()` uses `app/dataset_io.py` to discover all
+selected files, validate columns/checksums and normalize rows. It uses
+`app/dataset_store.py` for cross-dataset matching, provenance, import history,
+and a PostgreSQL advisory lock that serializes dataset import jobs.
+The older single-file helpers described immediately below remain for
+compatibility but are no longer called by `main()`.
+
 ### `find_dataset_file()`
 
 This searches the configured landing directory for `.xlsx` and `.csv` files.
@@ -495,14 +502,17 @@ Each normalized review receives a stable hash:
 item["review_hash"] = build_review_hash(item)
 ```
 
-The current input is also checked using an in-memory set. A duplicate in the
-same spreadsheet is skipped before another embedding is calculated.
+The current importer additionally matches a normalized content key through
+`app/dataset_store.py`. Matches retain their stable review hash and gain source
+provenance. They are re-embedded and upserted, so reruns repair incomplete indexes.
 
-### Qdrant collection rebuild
+### Additive indexing and explicit replacement
 
-The dataset Qdrant collection is deleted and recreated during ingestion. This
-removes legacy vectors that were created before deterministic identifiers were
-implemented. Only `airline_reviews` is rebuilt; web vectors are untouched.
+The dataset Qdrant collection is preserved by default. Explicit replacement
+requires `--replace --confirm-replace`, which also clears dataset Postgres rows
+and the Neo4j dataset subgraph. The previous implementation always rebuilt it.
+An explicit replacement also removes legacy vectors that were created before
+deterministic identifiers were implemented. Web vectors are untouched.
 
 The tradeoff is that an interrupted ingestion may leave the dataset collection
 incomplete. Running the ingestion again repairs it.
@@ -796,7 +806,7 @@ cannot `MERGE` a node using a null property.
 
 ### Snapshot synchronization
 
-Dataset ingestion calls `reset_dataset_graph()` before writing the new snapshot.
+Dataset ingestion calls `reset_dataset_graph()` only in explicit replacement mode.
 It deletes only `DatasetReview` nodes and orphaned dataset dimensions, preserving
 unrelated graph data. This also removes stale reviews that disappeared from the
 spreadsheet.
@@ -1015,10 +1025,10 @@ checks fail so that the three stores do not silently drift apart.
 
 ### What is the main ingestion risk?
 
-Dataset ingestion rebuilds its Qdrant collection and its Neo4j dataset
-subgraph. An interrupted run may leave either snapshot incomplete until
-ingestion is run again. Postgres remains protected by hash uniqueness and
-upserts, and rerunning ingestion safely restores both snapshots.
+The three stores do not share one transaction. Default ingestion preserves
+existing data, but new or enriched rows may be only partly indexed after an
+interruption. Rerun the same files to repair writes. Explicit replacement clears
+dataset data first and can leave an incomplete dataset until rerun.
 
 ### How are crawl quality and cost controlled?
 

@@ -225,6 +225,25 @@ def quality_issue(
     return None
 
 
+def permitted_sources(config: dict, selected=()) -> dict:
+    """Select only providers with documented collection consent, before API calls."""
+    selected = {name.casefold() for name in selected}
+    providers = config.get('provider_permissions', {})
+    result = {}
+    for airline, sources in config['airlines'].items():
+        if selected and airline.casefold() not in selected:
+            continue
+        permitted = []
+        for source in sources:
+            permission = providers.get(source['source_name'], {})
+            if (permission.get('permission_confirmed') is True
+                    and str(permission.get('permission_reference', '')).strip()):
+                permitted.append(source)
+        if permitted:
+            result[airline] = permitted
+    return result
+
+
 def load_source_config(config_path: Path = CONFIG_PATH) -> dict[str, Any]:
     """Load and validate the airline source YAML configuration."""
     if not config_path.exists():
@@ -452,6 +471,8 @@ def crawl_sources(
     output_path: Path = OUTPUT_PATH,
     selected_airlines: Iterable[str] = (),
     append: bool = False,
+    max_pages_per_source: int | None = None,
+    topic_terms: Iterable[str] = (),
 ) -> dict[str, int]:
     """Crawl configured sources and return detailed run metrics."""
     set_request_id(new_request_id("crawl"))
@@ -461,6 +482,18 @@ def crawl_sources(
         output_path,
         append,
     )
+    if max_pages_per_source is not None and max_pages_per_source < 1:
+        raise ValueError('max_pages_per_source must be positive')
+    topic_terms = tuple(term.strip() for term in topic_terms if term.strip())
+    config = load_source_config(config_path)
+    selected = {name.casefold() for name in selected_airlines}
+    unknown = selected - {name.casefold() for name in config['airlines']}
+    if unknown:
+        raise ValueError(f"Unknown airline selection: {', '.join(sorted(unknown))}")
+    allowed = permitted_sources(config, selected)
+    if not allowed:
+        raise RuntimeError('No sources have recorded collection permission. Update provider_permissions in the source configuration after obtaining consent. No API calls made; existing output preserved.')
+    config['airlines'] = allowed
     if Firecrawl is None:
         raise RuntimeError(
             "firecrawl-py could not be imported. Activate the project's "
@@ -469,13 +502,6 @@ def crawl_sources(
 
     if not settings.FIRECRAWL_API_KEY:
         raise RuntimeError("FIRECRAWL_API_KEY is missing from .env")
-
-    config = load_source_config(config_path)
-    selected = {name.casefold() for name in selected_airlines}
-    configured_names = {name.casefold() for name in config["airlines"]}
-    unknown = selected - configured_names
-    if unknown:
-        raise ValueError(f"Unknown airline selection: {', '.join(sorted(unknown))}")
 
     try:
         with tracked_operation(logger, "firecrawl_client_initialization"):
@@ -505,6 +531,9 @@ def crawl_sources(
         attempted_airlines.add(airline)
 
         for source in sources:
+            source = dict(source)
+            if max_pages_per_source is not None:
+                source['max_pages'] = min(max_pages_per_source, max(1, int(source.get('max_pages', DEFAULT_MAX_PAGES))))
             source_name = str(source["source_name"])
             seed_url = canonicalize_url(str(source["url"]))
             max_pages = max(1, int(source.get("max_pages", DEFAULT_MAX_PAGES)))
@@ -531,6 +560,7 @@ def crawl_sources(
 
             try:
                 seed_document = scrape_document(client, seed_url, include_links=True)
+                metrics['requests_succeeded'] += 1
             except RuntimeError as exc:
                 metrics["request_failed"] += 1
                 print(f"Source failed: {exc}")
@@ -564,6 +594,7 @@ def crawl_sources(
                         document = seed_document
                     else:
                         document = scrape_document(client, target_url)
+                        metrics['requests_succeeded'] += 1
                         if delay:
                             time.sleep(delay)
 
@@ -595,6 +626,14 @@ def crawl_sources(
                     metrics["duplicate_content"] += 1
                     continue
 
+                if topic_terms and not any(re.search(r'(?<!\w)' + re.escape(term) + r'(?!\w)',
+                                                     record['markdown'], re.IGNORECASE)
+                                           for term in topic_terms):
+                    metrics['rejected_off_topic'] += 1
+                    continue
+                if topic_terms:
+                    record['collection_topic_terms'] = list(topic_terms)
+
                 records.append(record)
                 seen_urls.add(record["source_url"])
                 seen_hashes.add(record["content_hash"])
@@ -617,6 +656,10 @@ def crawl_sources(
             "The crawl produced no acceptable pages; existing output was preserved."
         )
 
+    # A targeted append that found nothing must not rewrite the existing file.
+    if append and metrics['pages_accepted'] == 0:
+        metrics['records_written'] = 0
+        return dict(metrics)
     write_records_atomically(records, output_path)
     metrics["records_written"] = len(records)
     logger.info(

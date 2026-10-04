@@ -73,6 +73,10 @@ ANSWER:
 def prepare_rag_input(
     question: str,
     limit: int = 5,
+    retrieval_mode: str = 'vector',
+    route: str = '',
+    seat_type: str = '',
+    dataset_only: bool = False,
 ) -> dict:
     """Validate a question, retrieve reviews, and build the model prompt."""
     if not isinstance(question, str):
@@ -93,6 +97,8 @@ def prepare_rag_input(
         reviews = retrieve_reviews(
             query=question,
             limit=limit,
+            retrieval_mode=retrieval_mode, route=route, seat_type=seat_type,
+            dataset_only=dataset_only,
         )
     except (ValueError, RuntimeError):
         # These exceptions already contain user-facing context.
@@ -123,11 +129,17 @@ def prepare_rag_input(
 def answer_question(
     question: str,
     limit: int = 5,
+    retrieval_mode: str = 'vector',
+    route: str = '',
+    seat_type: str = '',
+    dataset_only: bool = False,
 ) -> dict:
     """Return a grounded answer together with its retrieved sources."""
     rag_input = prepare_rag_input(
         question=question,
         limit=limit,
+        retrieval_mode=retrieval_mode, route=route, seat_type=seat_type,
+        dataset_only=dataset_only,
     )
 
     retrieved_reviews = rag_input["retrieved_reviews"]
@@ -137,6 +149,7 @@ def answer_question(
             "question": question,
             "answer": "No relevant indexed airline sources were found.",
             "sources": [],
+            "retrieval_mode": retrieval_mode,
         }
 
     try:
@@ -159,6 +172,7 @@ def answer_question(
         "question": question,
         "answer": answer,
         "sources": sources,
+        "retrieval_mode": retrieval_mode,
     }
     logger.info(
         "event=rag_answer_completed source_count=%s answer_characters=%s",

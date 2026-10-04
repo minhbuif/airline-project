@@ -1,0 +1,32 @@
+# Fixed questions for before/after retrieval checks. Human evidence review is still required.
+cases:
+  - {airline: Qatar Airways, topic: economy seat comfort}
+  - {airline: Qatar Airways, topic: cabin crew service}
+  - {airline: Qatar Airways, topic: baggage and refunds}
+  - {airline: Emirates, topic: economy seat comfort}
+  - {airline: Emirates, topic: inflight food}
+  - {airline: Emirates, topic: customer service after cancellations}
+  - {airline: Singapore Airlines, topic: economy seat comfort}
+  - {airline: Singapore Airlines, topic: cabin crew service}
+  - {airline: Singapore Airlines, topic: inflight entertainment}
+  - {airline: Cathay Pacific, topic: economy seat comfort}
+  - {airline: Cathay Pacific, topic: inflight food}
+  - {airline: Cathay Pacific, topic: customer support}
+  - {airline: Japan Airlines, topic: economy seat comfort}
+  - {airline: Japan Airlines, topic: cabin crew service}
+  - {airline: Japan Airlines, topic: inflight food}
+  - {airline: Turkish Airlines, topic: economy seat comfort}
+  - {airline: Turkish Airlines, topic: baggage handling}
+  - {airline: Turkish Airlines, topic: inflight food}
+  - {airline: Lufthansa, topic: economy seat comfort}
+  - {airline: Lufthansa, topic: cabin crew service}
+  - {airline: Lufthansa, topic: refunds and cancellations}
+  - {airline: American Airlines, topic: economy seat comfort}
+  - {airline: American Airlines, topic: cabin crew service}
+  - {airline: American Airlines, topic: baggage handling}
+  - {airline: United Airlines, topic: economy seat comfort}
+  - {airline: United Airlines, topic: customer support}
+  - {airline: United Airlines, topic: inflight entertainment}
+  - {airline: Qantas Airways, topic: economy seat comfort}
+  - {airline: Qantas Airways, topic: cabin crew service}
+  - {airline: Qantas Airways, topic: refunds and cancellations}

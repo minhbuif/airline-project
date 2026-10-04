@@ -2,6 +2,7 @@
 
 import re
 import time
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -83,6 +84,10 @@ class AskRequest(BaseModel):
         ge=1,
         le=10,
     )
+    retrieval_mode: Literal['vector', 'graph'] = 'vector'
+    route: str = Field(default='', max_length=200)
+    seat_type: str = Field(default='', max_length=100)
+    dataset_only: bool = False
 
 
 @app.get("/health")
@@ -125,10 +130,13 @@ def search_only(request: AskRequest) -> dict:
         result = prepare_rag_input(
             question=request.question,
             limit=request.limit,
+            retrieval_mode=request.retrieval_mode, route=request.route,
+            seat_type=request.seat_type, dataset_only=request.dataset_only,
         )
 
         return {
             "question": result["question"],
+            "retrieval_mode": request.retrieval_mode,
             "retrieved_reviews": result[
                 "retrieved_reviews"
             ],
@@ -162,6 +170,8 @@ def ask(request: AskRequest) -> dict:
         return answer_question(
             question=request.question,
             limit=request.limit,
+            retrieval_mode=request.retrieval_mode, route=request.route,
+            seat_type=request.seat_type, dataset_only=request.dataset_only,
         )
 
     except RuntimeError as exc:

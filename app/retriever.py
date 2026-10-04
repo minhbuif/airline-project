@@ -6,9 +6,12 @@ from collections import Counter
 from typing import Any
 
 from qdrant_client import QdrantClient
+from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
 
 from app.config import settings
 from app.embedder import embed_text
+from app.airline_search import airline_filter
+from app.graph_retrieval import graph_review_hashes
 from app.logging_config import get_logger, track_call, tracked_operation
 
 
@@ -21,6 +24,7 @@ def _query_collection(
     collection_name: str,
     query_vector: list[float],
     limit: int,
+    query_filter=None,
 ) -> list[Any]:
     """Query one existing collection and return its scored points."""
     with tracked_operation(
@@ -34,6 +38,7 @@ def _query_collection(
             query=query_vector,
             limit=limit,
             with_payload=True,
+            query_filter=query_filter,
         )
     return list(response.points)
 
@@ -54,6 +59,7 @@ def _normalize_point(point: Any, collection_name: str) -> dict[str, Any]:
             or ("Web" if is_web else "Airline review dataset")
         ),
         "source_url": payload.get("source_url"),
+        "dataset_sources": payload.get("sources", []),
         "resolved_url": payload.get("resolved_url"),
         "airline_name": payload.get("airline_name"),
         "title": payload.get("title"),
@@ -105,7 +111,9 @@ def _select_diverse_results(
 
 
 @track_call
-def retrieve_reviews(query: str, limit: int = 5) -> list[dict]:
+def retrieve_reviews(query: str, limit: int = 5, *, filter_airlines: bool = True,
+                     retrieval_mode: str = 'vector', route: str = '', seat_type: str = '',
+                     dataset_only: bool = False) -> list[dict]:
     """Retrieve and merge relevant dataset reviews and crawled web chunks."""
     if not isinstance(query, str) or not query.strip():
         raise ValueError("Search query must be a non-empty string.")
@@ -115,6 +123,31 @@ def retrieve_reviews(query: str, limit: int = 5) -> list[dict]:
 
     if limit < 1:
         raise ValueError("Search limit must be at least 1.")
+    if retrieval_mode not in ('vector', 'graph'):
+        raise ValueError('retrieval_mode must be vector or graph')
+    if not isinstance(route, str) or not isinstance(seat_type, str):
+        raise ValueError('Route and cabin must be strings.')
+    route, seat_type = route.strip(), seat_type.strip()
+
+    # Apply metadata constraints before vector ranking, not after the top-k cut.
+    # No fallback to other airlines when the named airline has no evidence.
+    query_filter = airline_filter(query) if filter_airlines else None
+    logger.info('event=retrieval_airline_constraint enabled=%s values=%s',
+                query_filter is not None,
+                query_filter.must[0].match.any if query_filter else [])
+    airlines = query_filter.must[0].match.any if query_filter else []
+    conditions = list(query_filter.must) if query_filter else []
+    for field, value in [('route', route), ('seat_type', seat_type)]:
+        if value:
+            conditions.append(FieldCondition(key=field, match=MatchValue(value=value)))
+    if retrieval_mode == 'graph':
+        hashes = graph_review_hashes(airlines, route, seat_type)
+        if not hashes:
+            return []
+        conditions.append(FieldCondition(key='review_hash', match=MatchAny(any=hashes)))
+    # Keep metadata constraints as a second guard against stale graph edges.
+    query_filter = Filter(must=conditions) if conditions else None
+    dataset_only = dataset_only or retrieval_mode == 'graph' or bool(route or seat_type)
 
     try:
         client = QdrantClient(
@@ -144,6 +177,8 @@ def retrieve_reviews(query: str, limit: int = 5) -> list[dict]:
         settings.QDRANT_COLLECTION,
         settings.QDRANT_WEB_COLLECTION,
     ]))
+    if dataset_only:
+        collection_names = [settings.QDRANT_COLLECTION]
     candidates: list[dict[str, Any]] = []
     query_errors: list[str] = []
 
@@ -160,6 +195,7 @@ def retrieve_reviews(query: str, limit: int = 5) -> list[dict]:
                 collection_name=collection_name,
                 query_vector=query_vector,
                 limit=per_collection_limit,
+                query_filter=query_filter,
             )
         except Exception as exc:
             query_errors.append(f"{collection_name}: {exc}")
@@ -170,6 +206,7 @@ def retrieve_reviews(query: str, limit: int = 5) -> list[dict]:
             for point in points
         )
 
+    client.close()
     if not candidates and query_errors:
         raise RuntimeError(
             "Qdrant search failed for all available collections: "
@@ -177,6 +214,8 @@ def retrieve_reviews(query: str, limit: int = 5) -> list[dict]:
         )
 
     selected = _select_diverse_results(candidates, limit)
+    for source in selected:
+        source['retrieval_mode'] = retrieval_mode
     logger.info(
         "event=retrieval_completed candidate_count=%s result_count=%s "
         "collections=%s",

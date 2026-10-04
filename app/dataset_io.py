@@ -13,16 +13,16 @@ import yaml
 
 ALIASES = {
     'airline_name': ('airline_name', 'names', 'airline', 'airline name'),
-    'title': ('title', 'review_title'),
+    'title': ('title', 'review_title', 'review_header'),
     'review_text': ('review_text', 'review', 'content', 'text', 'review_content'),
     'country': ('country', 'author_country'),
     'review_date': ('review_date', 'date', 'review date', 'date_review'),
-    'verified': ('verified', 'trip verified'),
+    'verified': ('verified', 'trip verified', 'trip_verified'),
     'traveller_type': ('traveller_type', 'type of traveller', 'traveller type', 'type_of_traveller'),
     'seat_type': ('seat_type', 'seat type', 'cabin'),
     'route': ('route',), 'date_flown': ('date_flown', 'date flown'),
     'recommended': ('recommended',), 'aircraft': ('aircraft',),
-    'overall_rating': ('overall_rating', 'overall rating', 'rating'),
+    'overall_rating': ('overall_rating', 'overall rating', 'rating', 'over_all_rating'),
 }
 
 
@@ -30,6 +30,14 @@ def clean(value):
     if value is None or pd.isna(value):
         return ''
     return ' '.join(unicodedata.normalize('NFKC', str(value)).split())
+
+
+def airline_name(value):
+    """Make dataset slugs match display names without guessing subsidiary identities."""
+    value = clean(value)
+    if re.fullmatch(r'[a-z0-9]+(?:[-_][a-z0-9]+)+', value):
+        return re.sub(r'[-_]+', ' ', value).title()
+    return value
 
 
 def normalize(row, row_id):
@@ -47,13 +55,14 @@ def normalize(row, row_id):
     except (ValueError, TypeError):
         item['overall_rating'] = None
     item['source_row_id'] = str(row_id)
+    item['airline_name'] = airline_name(item['airline_name'])
     return item
 
 
 def content_key(item):
     """Match identical airline + prose despite differing metadata; not fuzzy similarity."""
     body = clean(item.get('review_text')).casefold()
-    airline = clean(item.get('airline_name')).casefold()
+    airline = airline_name(item.get('airline_name')).casefold()
     # Very short generic comments need metadata to avoid conflating separate reviews.
     identity = [airline, body]
     if len(body) < 80:
@@ -73,13 +82,14 @@ def discover_files(root, explicit=()):
     return list(dict.fromkeys(p.resolve() for p in paths))
 
 
-def load_inputs(paths, manifest_path='config/dataset_sources.yaml', limit=None):
+def load_inputs(paths, manifest_path='config/dataset_sources.yaml', limit=None, sample_per_airline=None):
     """Validate every input schema/checksum first; keep original source row numbers."""
     manifest = yaml.safe_load(Path(manifest_path).read_text()) if Path(manifest_path).exists() else {}
     sources = (manifest or {}).get('datasets', {})
     frames = []
     for path in paths:
-        digest = hashlib.file_digest(path.open('rb'), 'sha256').hexdigest()
+        with path.open('rb') as handle:
+            digest = hashlib.file_digest(handle, 'sha256').hexdigest()
         metadata = sources.get(path.name, {})
         if metadata.get('sha256') and metadata['sha256'] != digest:
             raise ValueError(f'Checksum mismatch for {path.name}')
@@ -88,7 +98,10 @@ def load_inputs(paths, manifest_path='config/dataset_sources.yaml', limit=None):
         for required in ('airline_name', 'review_text'):
             if not cols.intersection(ALIASES[required]):
                 raise ValueError(f'{path.name}: missing {required} column; columns: {list(frame.columns)}')
-        if limit:
+        if sample_per_airline:
+            airline_col = next(c for c in frame.columns if str(c).strip().casefold() in ALIASES['airline_name'])
+            frame = frame.groupby(frame[airline_col].map(airline_name), group_keys=False).head(sample_per_airline)
+        elif limit:
             frame = frame.head(limit)
         frame = frame.copy()
         frame['_source_row'] = frame.index.astype(str)

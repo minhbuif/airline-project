@@ -1,0 +1,14 @@
+# Explicit names only: avoid ambiguous words such as "American" or "United".
+# Values include spellings found in dataset and web payloads. Extend as needed.
+airlines:
+  Qatar Airways: [Qatar Airways, qatar-airways]
+  Emirates: [Emirates, emirates]
+  Singapore Airlines: [Singapore Airlines, singapore-airlines]
+  Cathay Pacific: [Cathay Pacific, cathay-pacific]
+  ANA All Nippon Airways: [ANA All Nippon Airways, All Nippon Airways, ana-all-nippon-airways]
+  Japan Airlines: [Japan Airlines, japan-airlines]
+  Turkish Airlines: [Turkish Airlines, turkish-airlines]
+  Lufthansa: [Lufthansa, lufthansa]
+  American Airlines: [American Airlines, american-airlines]
+  United Airlines: [United Airlines, united-airlines]
+  Qantas Airways: [Qantas Airways, Qantas, qantas-airways]

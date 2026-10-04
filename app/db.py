@@ -13,7 +13,7 @@ from app.logging_config import (
 from app.review_identity import build_review_hash
 
 # SQLAlchemy opens the actual database connection lazily on first use.
-engine = create_engine(settings.postgres_url)
+engine = create_engine(settings.postgres_url, connect_args={'connect_timeout': 5})
 logger = get_logger(__name__)
 
 

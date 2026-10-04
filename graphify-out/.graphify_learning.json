@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-10-01T09:04:56.989046+00:00",
+  "nodes": {
+    "app_retriever": {
+      "code_fingerprint": "c18fb6e177dc8e90465b543f59af218f0a7948da623c7f41820210e21d90a79a",
+      "label": "retriever.py",
+      "last": "2026-10-01T08:49:37.611336+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-01T08:49:37.611336+00:00",
+          "outcome": "useful",
+          "q": "Where should airline-aware retrieval be implemented?"
+        }
+      ],
+      "score": 0.999754172,
+      "source_file": "app/retriever.py",
+      "status": "tentative",
+      "uses": 1
+    },
+    "app_retriever_retrieve_reviews": {
+      "code_fingerprint": "c18fb6e177dc8e90465b543f59af218f0a7948da623c7f41820210e21d90a79a",
+      "label": "retrieve_reviews()",
+      "last": "2026-10-01T08:49:37.611336+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-01T08:49:37.611336+00:00",
+          "outcome": "useful",
+          "q": "Where should airline-aware retrieval be implemented?"
+        }
+      ],
+      "score": 0.999754172,
+      "source_file": "app/retriever.py",
+      "status": "tentative",
+      "uses": 1
+    }
+  },
+  "version": 1
+}

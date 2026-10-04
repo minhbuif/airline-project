@@ -218,8 +218,8 @@ running.
 
 ### 6. Ingest the spreadsheet dataset
 
-Place a `.xlsx` or `.csv` airline-review dataset in `landing/`. The current
-project uses:
+Place `.xlsx` or `.csv` airline-review datasets in `landing/`. All matching files
+are imported together by default. The original project dataset is:
 
 ```text
 landing/Airline_Reviews_Combined.xlsx
@@ -242,14 +242,55 @@ them to the `airline_reviews` Qdrant collection. It is safe to run repeatedly:
 - Postgres updates a matching review instead of inserting another row;
 - the first run after this feature was added removes legacy Postgres
   duplicates;
-- the dataset Qdrant collection is rebuilt with stable point IDs, removing
-  stale vectors and duplicates from earlier ingestion runs.
+- dataset vectors are upserted using stable IDs, preserving other imported files;
 - when `NEO4J_ENABLED=true`, reviews are also batch-merged into a graph with
   index-backed unique identities and relationships to airlines, routes,
   aircraft, countries, traveller types, and seat types.
 
-Only the dataset vector collection is rebuilt. Crawled web documents in
-`airline_web_documents` are not affected.
+Default ingestion is additive. Crawled web documents are not affected. Provenance
+is recorded per file checksum and original row number. Identical long review text
+for the same airline matches even when metadata differs; existing nonempty
+metadata is retained. Short generic comments use additional metadata to reduce
+false matches. Legacy duplicate candidates are reported in Admin, not silently
+removed by the new content-matching migration.
+
+Validate or pilot a specific file:
+
+```bash
+python -m app.ingest --file landing/mendeley_skytrax_2026.xlsx --dry-run
+python -m app.ingest --file landing/mendeley_skytrax_2026.xlsx --sample-per-airline 5
+```
+
+Repeat `--file` to select multiple inputs. `--limit N` reads the first N rows per
+file; `--sample-per-airline N` selects the first N per airline, not a random or
+statistically representative sample. Both preserve original row identifiers.
+The selected file must still fit in memory. Add source names, URLs, checksums,
+license and attribution to `config/dataset_sources.yaml`.
+
+To intentionally replace **all dataset records across Postgres, Qdrant and
+Neo4j** with the selected input files, use `--replace --confirm-replace`.
+This is destructive and cannot be combined with a pilot row limit. Back up first.
+Missing files are not deleted by default ingestion. The databases do not share
+one transaction: rerun the same import after interruptions.
+
+Admin → **Data coverage** → **Load data coverage** shows airline counts, date
+coverage, missing cabin/route metadata, attribution, duplicate candidates and
+recent import outcomes. It is a Postgres snapshot, not proof of index health.
+
+Search now filters explicit airline names using `config/airline_aliases.yaml`.
+The catalog covers 11 airlines; unknown names retain general semantic search.
+Evaluation reports include source evidence for manual review and support an
+`--unfiltered` baseline. Airline matching is not a measure of answer accuracy.
+
+To preview targeted collection for low review counts or missing recent reviews,
+run `python -m app.crawl_gaps`. Use `--airline`, `--min-reviews`, `--min-recent`,
+and `--topic-term` to narrow the target. It makes no scrape calls unless
+`--execute` is supplied and provider permission is recorded. Gap crawls append
+to existing web output; ingest accepted pages with `python -m app.ingest_web`
+without `--replace`. See the guide below for budgets and coverage limitations.
+
+See [DATA_EXPANSION.md](DATA_EXPANSION.md) for the dataset audit, collection
+permissions, evaluation commands, and remaining limitations.
 
 The summary is extractive rather than generative: every summary sentence comes
 from the original review. This keeps ingestion reproducible, avoids
@@ -257,6 +298,13 @@ hallucinated details, and adds very little runtime compared with embedding the
 review itself.
 
 ### 7. Crawl web sources
+
+The configured Flight-Report and Tripadvisor providers require prior consent
+for automated collection. They are disabled through `provider_permissions` in
+`config/airline_sources.yaml` until `permission_confirmed: true` and an actual
+`permission_reference` are recorded. With no eligible source the crawler stops
+before any paid API call and preserves existing output. The following crawl
+commands apply only after that permission step.
 
 For a low-cost smoke test that does not touch the project JSONL file:
 
@@ -746,10 +794,10 @@ docker compose down -v
 
 ## Current limitations
 
-- Spreadsheet ingestion rebuilds the dataset vector collection, so an
-  interrupted run should be rerun before using dataset search.
+- Dataset ingestion adds/updates records by default. Only explicit replacement
+  clears the dataset stores; replacement interruptions can leave partial indexes.
 - Postgres, Qdrant, and Neo4j do not share one transaction. If ingestion is
-  interrupted, rerun it to rebuild a consistent Qdrant and Neo4j snapshot.
+  interrupted, rerun the same files to repair partial writes.
 - Neo4j improves connected-data queries but does not replace Qdrant's semantic
   vector ranking; the two stores serve different query patterns.
 - Web collection quality depends on third-party page availability and markup.

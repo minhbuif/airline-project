@@ -62,7 +62,7 @@ class AdminTests(unittest.TestCase):
             app.text_input[0].input("test-admin")
             app.button[0].click().run()
             self.assertFalse(app.exception)
-            self.assertEqual(len(app.tabs), 3)
+            self.assertEqual(len(app.tabs), 4)
             app.sidebar.button[0].click().run()
             self.assertFalse(app.exception)
             self.assertEqual(len(app.tabs), 0)

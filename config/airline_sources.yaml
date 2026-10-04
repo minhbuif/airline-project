@@ -1,6 +1,22 @@
 # Each source starts from an airline listing page and follows only URLs that
 # match url_pattern. Limits keep crawl cost predictable while still collecting
 # multiple independent passenger reports per airline.
+# Record the actual consent reference before enabling a provider.
+provider_permissions:
+  Flight-Report:
+    permission_confirmed: false
+    permission_reference: ''
+    terms_url: https://flight-report.com/en/legal/
+    review_note: Prior consent is explicitly required for scraping (reviewed 2026-09-30).
+  Tripadvisor:
+    permission_confirmed: false
+    permission_reference: ''
+    terms_url: https://tripadvisor.mediaroom.com/us-terms-of-use
+    review_note: Automated collection requires express permission (reviewed 2026-09-30).
+# Dataset spellings used only when aggregating coverage for crawl planning.
+coverage_aliases:
+  ANA: [ANA All Nippon Airways, All Nippon Airways, ana-all-nippon-airways]
+  Cathay Pacific: [Cathay Pacific Airways, cathay-pacific-airways]
 airlines:
   Qatar Airways:
     - source_name: Flight-Report

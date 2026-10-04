@@ -1,4 +1,4 @@
-"""Password-protected monitoring page; no external service calls or mutations."""
+"""Password-protected monitoring page, with opt-in read-only database coverage."""
 
 from datetime import datetime
 
@@ -52,7 +52,29 @@ def monitor():
     metrics[0].metric("Events in window", len(rows))
     metrics[1].metric("Errors in window", sum(r["level"] in {"ERROR", "CRITICAL"} for r in rows))
     metrics[2].metric("Request IDs in window", len({r["request_id"] for r in rows if r["request_id"] != "-"}))
-    logs_tab, tasks_tab, config_tab = st.tabs(["Logs", "Tasks & calls", "Model & configuration"])
+    logs_tab, tasks_tab, config_tab, coverage_tab = st.tabs(["Logs", "Tasks & calls", "Model & configuration", "Data coverage"])
+    with coverage_tab:
+        st.caption('Load a Postgres snapshot on demand. Counts refer to stored dataset reviews, not successful Qdrant/Neo4j writes or crawled web chunks.')
+        if st.button('Load data coverage'):
+            try:
+                from app.coverage import load_coverage
+                st.session_state.coverage_snapshot = load_coverage()
+                st.session_state.coverage_loaded_at = datetime.now().astimezone().isoformat(timespec='seconds')
+            except (RuntimeError, ImportError) as exc:
+                st.error(str(exc))
+        coverage = st.session_state.get('coverage_snapshot')
+        if coverage:
+            st.caption('Snapshot: ' + st.session_state.coverage_loaded_at)
+            st.write({'Stored reviews': coverage['reviews'], 'Airlines': len(coverage['airlines']),
+                      'Without recorded provenance': coverage['unattributed'],
+                      'Legacy duplicate candidates': coverage['legacy_duplicate_candidates']})
+            st.caption('Sorted by fewest recent reviews, then smallest sample. Use this to prioritize collection; absence of reviews is not evidence of poor service.')
+            st.dataframe(coverage['airlines'], width='stretch', hide_index=True)
+            st.subheader('Sources and attribution')
+            st.dataframe(coverage['sources'], width='stretch', hide_index=True)
+            st.subheader('Recent dataset imports')
+            st.dataframe(coverage['runs'], width='stretch', hide_index=True)
+            st.caption('Matched-existing counts include reruns and cross-source matches. A Started run without a finish may have been interrupted. Older duplicate candidates are reported, not silently deleted.')
     with logs_tab:
         levels = st.multiselect("Levels", ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], default=["INFO", "WARNING", "ERROR", "CRITICAL"])
         query = st.text_input("Search event, module, caller, or request ID")

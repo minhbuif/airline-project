@@ -55,6 +55,9 @@ SET review.source_row_id = row.source_row_id,
     review.recommended = row.recommended,
     review.overall_rating = row.overall_rating,
     review.updated_at = datetime()
+SET review.source_names = row.source_names,
+    review.source_urls = row.source_urls,
+    review.source_licenses = row.source_licenses
 
 MERGE (airline:Airline {name: row.airline_name})
 MERGE (review)-[:ABOUT_AIRLINE]->(airline)
@@ -242,6 +245,9 @@ def build_graph_record(review: Mapping[str, Any], postgres_id: int) -> dict:
 
     return {
         "review_hash": review_hash,
+        "source_names": [s['source_name'] for s in review.get('sources', [])],
+        "source_urls": [s['source_url'] for s in review.get('sources', [])],
+        "source_licenses": [s['license'] for s in review.get('sources', [])],
         "postgres_id": int(postgres_id),
         "source_row_id": clean("source_row_id"),
         "airline_name": airline_name,
